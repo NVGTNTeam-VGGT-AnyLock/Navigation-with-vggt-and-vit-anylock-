@@ -11,6 +11,8 @@ import java.io.IOException
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.*
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.asRequestBody
 
 /**
  * Service responsible for managing local file operations for the visual scanner module.
@@ -72,7 +74,7 @@ class FileManagerService(private val context: Context) {
             throw FileManagerException("File does not exist or is not a regular file")
         }
         return try {
-            val requestFile = RequestBody.create(MediaType.get("image/jpeg"), file)
+            val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
             MultipartBody.Part.createFormData("image", file.name, requestFile)
         } catch (e: SecurityException) {
             throw FileManagerException("Security exception while preparing image part", e)

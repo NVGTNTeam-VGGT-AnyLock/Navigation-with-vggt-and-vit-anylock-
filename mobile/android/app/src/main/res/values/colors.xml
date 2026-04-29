@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand Colours -->
+    <color name="naviSense_primary">#FF1565C0</color>
+    <color name="naviSense_primary_variant">#FF0D47A1</color>
+    <color name="naviSense_secondary">#FF00BCD4</color>
+    <color name="naviSense_accent">#FFFF9800</color>
+
+    <!-- Material Theme Colours -->
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- Marker Tag Colours (matching BitmapDescriptorFactory hues) -->
+    <color name="marker_walking">#FF4CAF50</color>
+    <color name="marker_bicycle">#FF42A5F5</color>
+    <color name="marker_car">#FFFF9800</color>
+
+    <!-- Surface / Background -->
+    <color name="surface_dark">#FF121212</color>
+    <color name="card_background">#FFF5F5F5</color>
+</resources>
