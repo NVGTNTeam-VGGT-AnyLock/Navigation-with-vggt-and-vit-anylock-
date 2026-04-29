@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.NaviSense" parent="Theme.Material3.Light.NoActionBar">
+        <!-- Primary brand colours -->
+        <item name="colorPrimary">@color/naviSense_primary</item>
+        <item name="colorPrimaryVariant">@color/naviSense_primary_variant</item>
+        <item name="colorOnPrimary">@color/white</item>
+
+        <!-- Secondary brand colours -->
+        <item name="colorSecondary">@color/naviSense_secondary</item>
+        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorOnSecondary">@color/black</item>
+
+        <!-- Status bar -->
+        <item name="android:statusBarColor">@color/naviSense_primary</item>
+        <item name="android:navigationBarColor">@color/white</item>
+
+        <!-- Backgrounds -->
+        <item name="android:windowBackground">@color/white</item>
+    </style>
+
+</resources>

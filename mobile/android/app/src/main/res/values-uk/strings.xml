@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">NaviSense</string>
+
+    <!-- Search -->
+    <string name="search_hint">Пошук точок доставки…</string>
+
+    <!-- Filter Chips -->
+    <string name="filter_all">Усі</string>
+    <string name="filter_walking">Пішки</string>
+    <string name="filter_bicycle">Велосипед</string>
+    <string name="filter_car">Автомобіль</string>
+
+    <!-- Map Interactions -->
+    <string name="marker_added">📍 Маркер додано (%.4f, %.4f)</string>
+    <string name="marker_removed">🗑️ Маркер видалено</string>
+
+    <!-- Permissions -->
+    <string name="permission_location_denied">Для відображення вашого положення на карті потрібен дозвіл на геолокацію.</string>
+    <string name="permission_camera_denied">Для візуального позиціонування потрібен дозвіл на камеру.</string>
+
+    <!-- Info Window Defaults -->
+    <string name="marker_title_delivery_point">Точка доставки</string>
+    <string name="marker_snippet_format">Тег: %s — Натисніть для редагування</string>
+
+    <!-- Toast Messages -->
+    <string name="toast_no_internet">Немає підключення до інтернету. Перевірте мережу.</string>
+    <string name="toast_backend_unavailable">Бекенд недоступний. Повторна спроба…</string>
+</resources>

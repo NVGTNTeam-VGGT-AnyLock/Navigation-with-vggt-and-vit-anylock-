@@ -2,14 +2,11 @@ package com.navisense.core
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.*
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -99,18 +96,28 @@ class ScannerCamera(
 
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-        // Preview use case (optional)
+        // ── Preview use case ──────────────────────────────────────
         val preview = Preview.Builder()
             .build()
-            .also {
-                previewView?.previewSurfaceProvider = it.surfaceProvider
-            }
 
-        // ImageCapture use case (single shot, highest quality)
+        // Attach the PreviewView's surface provider to the preview use case
+        previewView?.let { viewFinder ->
+            preview.setSurfaceProvider(viewFinder.surfaceProvider)
+        }
+
+        // ── ImageCapture use case (modern ResolutionSelector API) ──
+        val resolutionSelector = ResolutionSelector.Builder()
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    Size(1080, 1920),
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                )
+            )
+            .build()
+
         imageCapture = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-            .setTargetResolution(android.util.Size(1080, 1920))
-            .setTargetFormat(ImageFormat.JPEG)
+            .setResolutionSelector(resolutionSelector)
             .build()
 
         try {
@@ -148,7 +155,8 @@ class ScannerCamera(
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
                     try {
-                        // Convert ImageProxy to Bitmap
+                        // Convert ImageProxy to Bitmap using the built-in
+                        // ImageProxy.toBitmap() from CameraX 1.4+ (no shadowing)
                         val bitmap = imageProxy.toBitmap()
                         imageProxy.close()
 
@@ -186,18 +194,6 @@ class ScannerCamera(
                 }
             }
         )
-    }
-
-    /**
-     * Converts an ImageProxy (JPEG format) into a Bitmap.
-     * Assumes the ImageProxy format is ImageFormat.JPEG.
-     */
-    private fun ImageProxy.toBitmap(): Bitmap {
-        require(format == ImageFormat.JPEG) { "Unsupported image format: $format" }
-        val buffer = planes[0].buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     /**

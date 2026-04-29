@@ -1,0 +1,26 @@
+[
+    {
+        "merged": "com.navisense.app-merged_res-4:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.navisense.app-main-6:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.navisense.app-merged_res-4:/layout_activity_main.xml.flat",
+        "source": "com.navisense.app-main-6:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.navisense.app-merged_res-4:/drawable_ic_search.xml.flat",
+        "source": "com.navisense.app-main-6:/drawable/ic_search.xml"
+    },
+    {
+        "merged": "com.navisense.app-merged_res-4:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.navisense.app-main-6:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.navisense.app-merged_res-4:/drawable_ic_launcher_background.xml.flat",
+        "source": "com.navisense.app-main-6:/drawable/ic_launcher_background.xml"
+    },
+    {
+        "merged": "com.navisense.app-merged_res-4:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.navisense.app-main-6:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    }
+]
