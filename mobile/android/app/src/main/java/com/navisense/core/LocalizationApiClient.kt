@@ -1,6 +1,7 @@
 package com.navisense.core
 
 import android.content.Context
+import com.navisense.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -97,16 +98,16 @@ class LocalizationApiClient private constructor(
 
                 if (!response.isSuccessful) {
                     val errorBody = response.errorBody()?.string() ?: "Unknown error"
-                    fileManagerService.logError("Backend returned HTTP ${response.code}: $errorBody")
+                    fileManagerService.logError("Backend returned HTTP ${response.code()}: $errorBody")
                     // Retry only on server errors (5xx) and not on client errors (4xx)
-                    if (response.code >= 500 && attempt < MAX_RETRIES) {
+                    if (response.code() >= 500 && attempt < MAX_RETRIES) {
                         // Exponential backoff before retry
                         val backoffDelay = (INITIAL_RETRY_DELAY_MS * BACKOFF_MULTIPLIER.pow(attempt.toDouble())).toLong()
                         delay(backoffDelay)
                         continue
                     } else {
                         // Client error or final attempt → throw
-                        throw IOException("Backend error ${response.code}: $errorBody")
+                        throw IOException("Backend error ${response.code()}: $errorBody")
                     }
                 }
 

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">NaviSense</string>
+
+    <!-- Search -->
+    <string name="search_hint">Search delivery points…</string>
+
+    <!-- Filter Chips -->
+    <string name="filter_all">All</string>
+    <string name="filter_walking">Walking</string>
+    <string name="filter_bicycle">Bicycle</string>
+    <string name="filter_car">Car</string>
+
+    <!-- Map Interactions -->
+    <string name="marker_added">📍 Marker added (%.4f, %.4f)</string>
+    <string name="marker_removed">🗑️ Marker removed</string>
+
+    <!-- Permissions -->
+    <string name="permission_location_denied">Location permission is needed to show your position on the map.</string>
+    <string name="permission_camera_denied">Camera permission is needed for visual positioning.</string>
+
+    <!-- Info Window Defaults -->
+    <string name="marker_title_delivery_point">Delivery Point</string>
+    <string name="marker_snippet_format">Tag: %s — Tap to edit</string>
+
+    <!-- Toast Messages -->
+    <string name="toast_no_internet">No internet connection. Please check your network.</string>
+    <string name="toast_backend_unavailable">Backend is not available. Retrying…</string>
+</resources>
