@@ -6,7 +6,7 @@ import android.util.AttributeSet
 import android.view.View
 
 /**
- * A custom Canvas-drawn BarChart that shows "Visited" vs "Not Visited" counts.
+ * A custom Canvas-drawn BarChart that shows "Visited" vs "Favorites" counts.
  *
  * Data is provided via [setData].
  */
@@ -27,14 +27,19 @@ class BarChartView @JvmOverloads constructor(
         isFakeBoldText = true
     }
 
+    // Four bars: Visited, Not Visited, Favorites, Not Favorites
     private var visitedCount = 0
     private var notVisitedCount = 0
+    private var favoriteCount = 0
+    private var notFavoriteCount = 0
     private var maxCount = 1
 
-    fun setData(visited: Int, notVisited: Int) {
+    fun setData(visited: Int, notVisited: Int, favorites: Int = 0, notFavorites: Int = 0) {
         visitedCount = visited
         notVisitedCount = notVisited
-        maxCount = maxOf(visited, notVisited, 1)
+        favoriteCount = favorites
+        notFavoriteCount = notFavorites
+        maxCount = maxOf(visited, notVisited, favorites, notFavorites, 1)
         invalidate()
     }
 
@@ -44,55 +49,39 @@ class BarChartView @JvmOverloads constructor(
         val chartWidth = width.toFloat()
         val chartHeight = height - 80f // leave room for labels
 
-        val barWidth = chartWidth * 0.3f
-        val gap = chartWidth * 0.1f
+        val totalBars = 4
+        val totalGaps = totalBars + 1
+        val gap = chartWidth * 0.06f
+        val barWidth = (chartWidth - gap * totalGaps) / totalBars
         val baselineY = chartHeight
 
-        // ── Draw "Visited" bar ────────────────────────────────────
-        val visitedBarHeight = (visitedCount.toFloat() / maxCount) * (chartHeight - 40f)
-        val visitedLeft = gap
-        val visitedRight = visitedLeft + barWidth
-
-        barPaint.color = Color.parseColor("#43A047") // Green
-        barPaint.style = Paint.Style.FILL
-        canvas.drawRect(visitedLeft, baselineY - visitedBarHeight, visitedRight, baselineY, barPaint)
-
-        // Value label
-        canvas.drawText(
-            "$visitedCount",
-            (visitedLeft + visitedRight) / 2f,
-            baselineY - visitedBarHeight - 10f,
-            valuePaint
+        val bars = listOf(
+            Triple("Visited", visitedCount, Color.parseColor("#43A047")),  // Green
+            Triple("Not Visited", notVisitedCount, Color.parseColor("#E53935")),  // Red
+            Triple("Favorites", favoriteCount, Color.parseColor("#E91E63")),  // Pink
+            Triple("Others", notFavoriteCount, Color.parseColor("#9E9E9E"))   // Gray
         )
 
-        // X-axis label
-        canvas.drawText("Visited", (visitedLeft + visitedRight) / 2f, baselineY + 40f, labelPaint)
+        bars.forEachIndexed { index, (label, count, color) ->
+            val left = gap + index * (barWidth + gap)
+            val right = left + barWidth
+            val barHeight = (count.toFloat() / maxCount) * (chartHeight - 40f)
 
-        // ── Draw "Not Visited" bar ────────────────────────────────
-        val notVisitedBarHeight = (notVisitedCount.toFloat() / maxCount) * (chartHeight - 40f)
-        val notVisitedLeft = visitedRight + gap
-        val notVisitedRight = notVisitedLeft + barWidth
+            // Draw bar
+            barPaint.color = color
+            barPaint.style = Paint.Style.FILL
+            canvas.drawRect(left, baselineY - barHeight, right, baselineY, barPaint)
 
-        barPaint.color = Color.parseColor("#E53935") // Red
-        canvas.drawRect(
-            notVisitedLeft, baselineY - notVisitedBarHeight,
-            notVisitedRight, baselineY, barPaint
-        )
+            // Value label above bar
+            canvas.drawText(
+                "$count",
+                (left + right) / 2f,
+                baselineY - barHeight - 10f,
+                valuePaint
+            )
 
-        // Value label
-        canvas.drawText(
-            "$notVisitedCount",
-            (notVisitedLeft + notVisitedRight) / 2f,
-            baselineY - notVisitedBarHeight - 10f,
-            valuePaint
-        )
-
-        // X-axis label
-        canvas.drawText(
-            "Not Visited",
-            (notVisitedLeft + notVisitedRight) / 2f,
-            baselineY + 40f,
-            labelPaint
-        )
+            // X-axis label below bar
+            canvas.drawText(label, (left + right) / 2f, baselineY + 40f, labelPaint)
+        }
     }
 }

@@ -28,12 +28,14 @@ import kotlinx.coroutines.launch
 
 /**
  * Route Builder screen with a split UI:
- * - Top half: Google Map showing waypoints and a Polyline route.
+ * - Top half: Google Map showing waypoints and a Polyline route (road-aware mock).
  * - Bottom half: List of saved locations for the user to select waypoints.
  *
- * The user selects waypoints from the list, specifies start/end points,
- * and can tap "Start Navigation" to open the external Google Maps app
- * with the final destination as a navigation intent.
+ * Implements the "Pac-Man" algorithm:
+ * 1. First selected waypoint MUST remain the Start.
+ * 2. Last selected waypoint MUST remain the Finish.
+ * 3. Middle waypoints are automatically re-ordered to find the SHORTEST total
+ *    Haversine distance (nearest-neighbor TSP heuristic).
  */
 class RouteBuilderFragment : Fragment() {
 
@@ -83,9 +85,6 @@ class RouteBuilderFragment : Fragment() {
     // ── Waypoints List ─────────────────────────────────────────────
 
     private fun initWaypointsList() {
-        // Use lateinit to break the forward-reference cycle:
-        // the onToggle lambda references the adapter variable which is
-        // passed into the adapter's constructor.
         lateinit var adapter: WaypointAdapter
         adapter = WaypointAdapter(
             locations = emptyList(),
@@ -161,14 +160,27 @@ class RouteBuilderFragment : Fragment() {
             if (marker != null) waypointMarkers.add(marker)
         }
 
-        // Draw Polyline connecting waypoints in order
-        routePolyline = map.addPolyline(
-            PolylineOptions()
-                .addAll(latLngs)
-                .width(5f)
-                .color(0xFF1565C0.toInt())
-                .geodesic(true)
-        )
+        // Draw road-aware Polyline using mock interpolated points
+        val polylinePoints = viewModel.routePolylinePoints.value
+        if (polylinePoints.isNotEmpty()) {
+            val routeLatLngs = polylinePoints.map { LatLng(it.first, it.second) }
+            routePolyline = map.addPolyline(
+                PolylineOptions()
+                    .addAll(routeLatLngs)
+                    .width(6f)
+                    .color(0xFF1565C0.toInt())
+                    .geodesic(false)
+            )
+        } else {
+            // Fallback: straight line if no polyline data
+            routePolyline = map.addPolyline(
+                PolylineOptions()
+                    .addAll(latLngs)
+                    .width(5f)
+                    .color(0xFF1565C0.toInt())
+                    .geodesic(true)
+            )
+        }
 
         // Zoom to fit all waypoints
         if (latLngs.size > 1) {
@@ -189,6 +201,21 @@ class RouteBuilderFragment : Fragment() {
             (binding.rvWaypoints.adapter as? WaypointAdapter)?.notifyDataSetChanged()
         }
 
+        // Optimize Route button: reorders middle waypoints using TSP heuristic
+        binding.btnOptimizeRoute.setOnClickListener {
+            val waypoints = viewModel.routeWaypoints.value
+            if (waypoints.size < 3) {
+                Toast.makeText(requireContext(), R.string.route_optimize_min, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            viewModel.optimizeRoute()
+            // Update local selectedIds to match new order
+            selectedIds.clear()
+            selectedIds.addAll(viewModel.routeWaypoints.value.map { it.id })
+            (binding.rvWaypoints.adapter as? WaypointAdapter)?.notifyDataSetChanged()
+            Toast.makeText(requireContext(), R.string.route_optimized, Toast.LENGTH_SHORT).show()
+        }
+
         binding.btnStartNavigation.setOnClickListener {
             val waypoints = viewModel.routeWaypoints.value
             if (waypoints.isEmpty()) {
@@ -196,7 +223,7 @@ class RouteBuilderFragment : Fragment() {
                 return@setOnClickListener
             }
 
-            // Launch Google Maps navigation to the final destination
+            // Build a multi-destination Google Maps URL with all waypoints
             val destination = waypoints.last()
             val gmmIntentUri = Uri.parse("google.navigation:q=${destination.latitude},${destination.longitude}")
             val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
@@ -205,9 +232,15 @@ class RouteBuilderFragment : Fragment() {
             if (mapIntent.resolveActivity(requireActivity().packageManager) != null) {
                 startActivity(mapIntent)
             } else {
-                // Fallback to web URL
+                // Fallback to web URL with waypoints
+                val waypointsParam = waypoints.drop(1).dropLast(1).joinToString("|") {
+                    "${it.latitude},${it.longitude}"
+                }
                 val webUri = Uri.parse(
-                    "https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}"
+                    "https://www.google.com/maps/dir/?api=1" +
+                            "&origin=${waypoints.first().latitude},${waypoints.first().longitude}" +
+                            "&destination=${destination.latitude},${destination.longitude}" +
+                            (if (waypointsParam.isNotEmpty()) "&waypoints=$waypointsParam" else "")
                 )
                 startActivity(Intent(Intent.ACTION_VIEW, webUri))
             }
@@ -230,7 +263,6 @@ class RouteBuilderFragment : Fragment() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
             val view = LayoutInflater.from(parent.context)
                 .inflate(android.R.layout.simple_list_item_activated_1, parent, false)
-            // Explicitly cast the inflated View to TextView
             return ViewHolder(view as TextView)
         }
 
@@ -250,8 +282,6 @@ class RouteBuilderFragment : Fragment() {
 
             init {
                 textView.setPadding(16, 12, 16, 12)
-                // Use TextViewCompat.setTextAppearance instead of the property,
-                // which may not be available on all API levels
                 TextViewCompat.setTextAppearance(
                     textView,
                     com.google.android.material.R.style.TextAppearance_Material3_BodyLarge

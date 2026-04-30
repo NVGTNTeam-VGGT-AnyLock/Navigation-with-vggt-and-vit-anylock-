@@ -40,4 +40,10 @@ interface LocationRepository {
      * Convenience method used by the "Mark as Visited" button.
      */
     suspend fun toggleVisited(id: Int)
+
+    /**
+     * Toggle the [AppLocation.isFavorite] flag for a given [id].
+     * Convenience method used by the "Favorite" (heart) button.
+     */
+    suspend fun toggleFavorite(id: Int)
 }

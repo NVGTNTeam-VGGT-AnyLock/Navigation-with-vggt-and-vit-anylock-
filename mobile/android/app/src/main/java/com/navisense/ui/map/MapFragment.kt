@@ -3,12 +3,14 @@ package com.navisense.ui.map
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -30,6 +32,8 @@ import com.navisense.ui.MainViewModel
 import com.navisense.ui.details.LocationDetailsBottomSheet
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import androidx.core.os.LocaleListCompat
+import java.util.Locale
 
 class MapFragment : Fragment() {
 
@@ -47,6 +51,11 @@ class MapFragment : Fragment() {
 
     /** Currently visible circle (radius filter). */
     private var radiusCircle: Circle? = null
+
+    // Track filter button states
+    private var visitedFilterActive = false
+    private var favoritesFilterActive = false
+    private var visitedFilterMode: Boolean? = null // null=all, true=visited, false=not
 
     // ── Permission launcher (Location only — camera is separate) ──
     private val locationPermissionLauncher = registerForActivityResult(
@@ -74,9 +83,12 @@ class MapFragment : Fragment() {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
 
         initMapFragment()
+        initSearchBar()
         initCategoryChips()
+        initAdvancedFilters()
         initRadiusFilter()
         initFabMyLocation()
+        initLanguageToggle()
         observeViewModel()
     }
 
@@ -108,6 +120,18 @@ class MapFragment : Fragment() {
         }
     }
 
+    // ── Search Bar ─────────────────────────────────────────────────
+
+    private fun initSearchBar() {
+        binding.etSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                viewModel.setSearchQuery(s?.toString() ?: "")
+            }
+        })
+    }
+
     // ── Category Chips ─────────────────────────────────────────────
 
     private fun initCategoryChips() {
@@ -125,8 +149,8 @@ class MapFragment : Fragment() {
         }
         chipGroup.addView(allChip)
 
-        // One chip per category
-        AppLocationCategory.entries.forEach { category ->
+        // One chip per category (excluding NO_CATEGORY from chip filter)
+        AppLocationCategory.entries.filter { it != AppLocationCategory.NO_CATEGORY }.forEach { category ->
             val chip = Chip(requireContext(), null, com.google.android.material.R.style.Widget_Material3_Chip_Filter)
             chip.text = category.key
             chip.isCheckable = true
@@ -139,6 +163,51 @@ class MapFragment : Fragment() {
         }
 
         chipGroup.isSingleSelection = true
+    }
+
+    // ── Advanced Filters: Visited & Favorites ──────────────────────
+
+    private fun initAdvancedFilters() {
+        binding.btnFilterVisited.setOnClickListener {
+            when (visitedFilterMode) {
+                null -> {
+                    // Show visited only
+                    visitedFilterMode = true
+                    visitedFilterActive = true
+                    viewModel.setVisitedFilter(true)
+                    binding.btnFilterVisited.setText(R.string.filter_visited_only)
+                    binding.btnFilterVisited.alpha = 1.0f
+                }
+                true -> {
+                    // Show not visited only
+                    visitedFilterMode = false
+                    viewModel.setVisitedFilter(false)
+                    binding.btnFilterVisited.setText(R.string.filter_not_visited)
+                }
+                false -> {
+                    // Clear filter
+                    visitedFilterMode = null
+                    visitedFilterActive = false
+                    viewModel.setVisitedFilter(null)
+                    binding.btnFilterVisited.setText(R.string.filter_visited)
+                    binding.btnFilterVisited.alpha = 0.6f
+                }
+            }
+        }
+        binding.btnFilterVisited.alpha = 0.6f
+
+        binding.btnFilterFavorites.setOnClickListener {
+            favoritesFilterActive = !favoritesFilterActive
+            viewModel.toggleFavoritesFilter()
+            if (favoritesFilterActive) {
+                binding.btnFilterFavorites.setText(R.string.filter_favorites_only)
+                binding.btnFilterFavorites.alpha = 1.0f
+            } else {
+                binding.btnFilterFavorites.setText(R.string.filter_favorites)
+                binding.btnFilterFavorites.alpha = 0.6f
+            }
+        }
+        binding.btnFilterFavorites.alpha = 0.6f
     }
 
     // ── Radius Filter ──────────────────────────────────────────────
@@ -196,6 +265,25 @@ class MapFragment : Fragment() {
                     ContextCompat.getColor(requireContext(), R.color.radius_fill)
                 )
         )
+    }
+
+    // ── Language Toggle ────────────────────────────────────────────
+
+    private fun initLanguageToggle() {
+        updateLanguageButtonText()
+        binding.btnLanguageToggle.setOnClickListener {
+            val currentLocale = resources.configuration.locales[0]
+            val isEnglish = currentLocale.language == "en"
+            val langTag = if (isEnglish) "uk" else "en"
+            AppCompatDelegate.setApplicationLocales(
+                LocaleListCompat.forLanguageTags(langTag)
+            )
+        }
+    }
+
+    private fun updateLanguageButtonText() {
+        val currentLocale = resources.configuration.locales[0]
+        binding.btnLanguageToggle.text = if (currentLocale.language == "en") "EN" else "UK"
     }
 
     // ── My Location FAB ────────────────────────────────────────────
@@ -275,52 +363,39 @@ class MapFragment : Fragment() {
     private fun renderMarkers(locations: List<AppLocation>) {
         if (!isMapReady) return
 
-        val visibleIds = locations.map { it.id }.toSet()
+        // Clear all existing markers and re-add fresh.
+        // This ensures isVisited/isFavorite state changes are reflected
+        // in marker icons (visited→gray, favorite→distinct hue).
+        map.clear()
+        markerMap.clear()
 
-        // Remove markers no longer in list
-        markerMap.keys.filter { it !in visibleIds }.forEach { id ->
-            markerMap[id]?.remove()
-            markerMap.remove(id)
-        }
+        // Rebuild radius circle if active (cleared by map.clear())
+        updateRadiusCircle()
 
-        // Add / update markers
         locations.forEach { location ->
-            val existing = markerMap[location.id]
-            if (existing != null) {
-                existing.position = LatLng(location.latitude, location.longitude)
-                existing.title = location.title
-                existing.snippet = location.description
-            } else {
-                val markerOptions = MarkerOptions()
-                    .position(LatLng(location.latitude, location.longitude))
-                    .title(location.title)
-                    .snippet(location.description)
-                    .icon(getMarkerIcon(location))
+            val markerOptions = MarkerOptions()
+                .position(LatLng(location.latitude, location.longitude))
+                .title(location.title)
+                .snippet(location.description)
+                .icon(getMarkerIcon(location))
 
-                val marker = map.addMarker(markerOptions)
-                if (marker != null) {
-                    marker.tag = location.id
-                    markerMap[location.id] = marker
-                }
+            val marker = map.addMarker(markerOptions)
+            if (marker != null) {
+                marker.tag = location.id
+                markerMap[location.id] = marker
             }
         }
     }
 
     /**
      * Returns a coloured marker: GRAY if visited, category colour otherwise.
+     * Favorite locations get a slight alpha or distinct treatment.
      */
     private fun getMarkerIcon(location: AppLocation): BitmapDescriptor {
         return if (location.isVisited) {
             BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_VIOLET)
         } else {
-            val hue = when (location.category) {
-                AppLocationCategory.MONUMENT.key -> BitmapDescriptorFactory.HUE_RED
-                AppLocationCategory.GROCERY.key -> BitmapDescriptorFactory.HUE_GREEN
-                AppLocationCategory.GAS_STATION.key -> BitmapDescriptorFactory.HUE_ORANGE
-                AppLocationCategory.RESTAURANT.key -> BitmapDescriptorFactory.HUE_CYAN
-                AppLocationCategory.PHARMACY.key -> BitmapDescriptorFactory.HUE_BLUE
-                else -> BitmapDescriptorFactory.HUE_RED
-            }
+            val hue = AppLocationCategory.markerHue(location.category)
             BitmapDescriptorFactory.defaultMarker(hue)
         }
     }

@@ -48,6 +48,12 @@ class MockLocationRepositoryImpl : LocationRepository {
         }
     }
 
+    override suspend fun toggleFavorite(id: Int) {
+        _locations.value = _locations.value.map {
+            if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it
+        }
+    }
+
     companion object {
         /** Seed data: well-known landmarks / street art / points of interest
          *  around Kyiv, demonstrating varied categories. */
@@ -59,7 +65,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4347,
                 longitude = 30.5590,
                 category = AppLocationCategory.MONUMENT.key,
-                isVisited = true
+                isVisited = true,
+                isFavorite = true
             ),
             AppLocation(
                 id = 2,
@@ -68,7 +75,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4547,
                 longitude = 30.5190,
                 category = AppLocationCategory.MONUMENT.key,
-                isVisited = false
+                isVisited = false,
+                isFavorite = true
             ),
             AppLocation(
                 id = 3,
@@ -77,7 +85,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4444,
                 longitude = 30.5385,
                 category = AppLocationCategory.MONUMENT.key,
-                isVisited = true
+                isVisited = true,
+                isFavorite = false
             ),
             AppLocation(
                 id = 4,
@@ -86,7 +95,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4584,
                 longitude = 30.5158,
                 category = AppLocationCategory.RESTAURANT.key,
-                isVisited = false
+                isVisited = false,
+                isFavorite = false
             ),
             AppLocation(
                 id = 5,
@@ -95,7 +105,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4664,
                 longitude = 30.5150,
                 category = AppLocationCategory.GROCERY.key,
-                isVisited = false
+                isVisited = false,
+                isFavorite = false
             ),
             AppLocation(
                 id = 6,
@@ -104,7 +115,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.5019,
                 longitude = 30.4983,
                 category = AppLocationCategory.GAS_STATION.key,
-                isVisited = true
+                isVisited = true,
+                isFavorite = false
             ),
             AppLocation(
                 id = 7,
@@ -113,7 +125,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4474,
                 longitude = 30.5215,
                 category = AppLocationCategory.PHARMACY.key,
-                isVisited = false
+                isVisited = false,
+                isFavorite = true
             ),
             AppLocation(
                 id = 8,
@@ -122,7 +135,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4605,
                 longitude = 30.5140,
                 category = AppLocationCategory.RESTAURANT.key,
-                isVisited = true
+                isVisited = true,
+                isFavorite = false
             ),
             AppLocation(
                 id = 9,
@@ -131,7 +145,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4385,
                 longitude = 30.5490,
                 category = AppLocationCategory.MONUMENT.key,
-                isVisited = false
+                isVisited = false,
+                isFavorite = false
             ),
             AppLocation(
                 id = 10,
@@ -140,7 +155,8 @@ class MockLocationRepositoryImpl : LocationRepository {
                 latitude = 50.4498,
                 longitude = 30.5100,
                 category = AppLocationCategory.GROCERY.key,
-                isVisited = false
+                isVisited = false,
+                isFavorite = false
             )
         )
     }
