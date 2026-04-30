@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/mapFragment"
+        android:icon="@drawable/ic_map"
+        android:title="@string/tab_map" />
+
+    <item
+        android:id="@+id/routeBuilderFragment"
+        android:icon="@drawable/ic_route"
+        android:title="@string/tab_routes" />
+
+    <item
+        android:id="@+id/addLocationFragment"
+        android:icon="@drawable/ic_add"
+        android:title="@string/tab_add" />
+
+    <item
+        android:id="@+id/analyticsFragment"
+        android:icon="@drawable/ic_analytics"
+        android:title="@string/tab_analytics" />
+
+    <item
+        android:id="@+id/visualSearchFragment"
+        android:icon="@drawable/ic_search_photo"
+        android:title="@string/tab_visual_search" />
+
+</menu>

@@ -6,12 +6,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.coordinatorlayout.widget.CoordinatorLayout;
+import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.fragment.app.FragmentContainerView;
 import androidx.viewbinding.ViewBinding;
 import androidx.viewbinding.ViewBindings;
-import com.google.android.material.card.MaterialCardView;
-import com.google.android.material.chip.ChipGroup;
-import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.navisense.R;
 import java.lang.NullPointerException;
 import java.lang.Override;
@@ -19,33 +18,25 @@ import java.lang.String;
 
 public final class ActivityMainBinding implements ViewBinding {
   @NonNull
-  private final CoordinatorLayout rootView;
+  private final ConstraintLayout rootView;
 
   @NonNull
-  public final ChipGroup chipGroupFilters;
+  public final BottomNavigationView bottomNavigation;
 
   @NonNull
-  public final TextInputEditText etSearch;
+  public final FragmentContainerView navHostFragment;
 
-  @NonNull
-  public final MaterialCardView filterCard;
-
-  @NonNull
-  public final MaterialCardView searchCard;
-
-  private ActivityMainBinding(@NonNull CoordinatorLayout rootView,
-      @NonNull ChipGroup chipGroupFilters, @NonNull TextInputEditText etSearch,
-      @NonNull MaterialCardView filterCard, @NonNull MaterialCardView searchCard) {
+  private ActivityMainBinding(@NonNull ConstraintLayout rootView,
+      @NonNull BottomNavigationView bottomNavigation,
+      @NonNull FragmentContainerView navHostFragment) {
     this.rootView = rootView;
-    this.chipGroupFilters = chipGroupFilters;
-    this.etSearch = etSearch;
-    this.filterCard = filterCard;
-    this.searchCard = searchCard;
+    this.bottomNavigation = bottomNavigation;
+    this.navHostFragment = navHostFragment;
   }
 
   @Override
   @NonNull
-  public CoordinatorLayout getRoot() {
+  public ConstraintLayout getRoot() {
     return rootView;
   }
 
@@ -70,32 +61,20 @@ public final class ActivityMainBinding implements ViewBinding {
     // This is done to optimize the compiled bytecode for size and performance.
     int id;
     missingId: {
-      id = R.id.chip_group_filters;
-      ChipGroup chipGroupFilters = ViewBindings.findChildViewById(rootView, id);
-      if (chipGroupFilters == null) {
+      id = R.id.bottom_navigation;
+      BottomNavigationView bottomNavigation = ViewBindings.findChildViewById(rootView, id);
+      if (bottomNavigation == null) {
         break missingId;
       }
 
-      id = R.id.et_search;
-      TextInputEditText etSearch = ViewBindings.findChildViewById(rootView, id);
-      if (etSearch == null) {
+      id = R.id.nav_host_fragment;
+      FragmentContainerView navHostFragment = ViewBindings.findChildViewById(rootView, id);
+      if (navHostFragment == null) {
         break missingId;
       }
 
-      id = R.id.filter_card;
-      MaterialCardView filterCard = ViewBindings.findChildViewById(rootView, id);
-      if (filterCard == null) {
-        break missingId;
-      }
-
-      id = R.id.search_card;
-      MaterialCardView searchCard = ViewBindings.findChildViewById(rootView, id);
-      if (searchCard == null) {
-        break missingId;
-      }
-
-      return new ActivityMainBinding((CoordinatorLayout) rootView, chipGroupFilters, etSearch,
-          filterCard, searchCard);
+      return new ActivityMainBinding((ConstraintLayout) rootView, bottomNavigation,
+          navHostFragment);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

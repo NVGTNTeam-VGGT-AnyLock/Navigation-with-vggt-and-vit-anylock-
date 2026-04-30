@@ -1,171 +1,166 @@
 package com.navisense.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.navisense.model.MarkerItem
+import com.navisense.data.LocationRepository
+import com.navisense.data.MockLocationRepositoryImpl
+import com.navisense.model.AppLocation
+import com.navisense.model.AppLocationCategory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
- * ViewModel for the main map screen.
+ * Shared ViewModel for the entire Location Management App.
  *
- * Manages:
- * - The list of all placed markers ([_allMarkers]).
- * - The currently active filter tag ([_selectedTag]).
- * - A derived, automatically-updating list of filtered markers ([filteredMarkers]).
- * - Adding new markers via user map-tap.
+ * Uses [LocationRepository] for all data access. Currently backed by
+ * [MockLocationRepositoryImpl]; Anya will swap this for a Room-based
+ * implementation without changing any ViewModel code.
+ *
+ * Exposes:
+ * - [allLocations] — unfiltered list from the repository
+ * - [selectedCategory] — active category filter (null = All)
+ * - [filteredLocations] — derived StateFlow combining the two above
+ * - [selectedRadiusKm] — radius filter for map
+ * - [analyticsData] — computed stats for the Analytics screen
  */
-class MainViewModel : ViewModel() {
+class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    /** All markers placed by the user (mutable internal state). */
-    private val _allMarkers = MutableStateFlow<List<MarkerItem>>(emptyList())
+    // ── Repository (swap here when Room is ready) ──────────────────
+    private val repository: LocationRepository = MockLocationRepositoryImpl()
 
-    /** Currently selected filter tag. `null` means "All" (show everything). */
-    private val _selectedTag = MutableStateFlow<String?>(null)
+    // ── State: All Locations ───────────────────────────────────────
+    val allLocations: StateFlow<List<AppLocation>> = repository.getAllLocations()
 
-    /** Expose the selected tag as an immutable [StateFlow]. */
-    val selectedTag: StateFlow<String?> = _selectedTag.asStateFlow()
+    // ── State: Category Filter ─────────────────────────────────────
+    private val _selectedCategory = MutableStateFlow<String?>(null)
+    val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
 
-    /**
-     * The currently displayed markers, derived from both the full list and the
-     * active filter tag. Automatically updates whenever either source changes.
-     *
-     * - When [selectedTag] is `null` or `"All"`, all markers are returned.
-     * - Otherwise, only markers whose [MarkerItem.tag] matches are returned.
-     */
-    val filteredMarkers: StateFlow<List<MarkerItem>> =
-        combine(_allMarkers, _selectedTag) { markers, tag ->
-            if (tag == null || tag == MarkerItem.TAG_ALL) {
-                markers
+    /** Filtered list derived from category + all locations. */
+    val filteredLocations: StateFlow<List<AppLocation>> =
+        combine(allLocations, _selectedCategory) { locations, category ->
+            if (category == null || category == AppLocationCategory.MONUMENT.key) {
+                locations
             } else {
-                markers.filter { it.tag == tag }
+                locations.filter { it.category == category }
             }
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // ── Mock initial markers ─────────────────────────────────────
+    // ── State: Radius Filter (km) ──────────────────────────────────
+    private val _selectedRadiusKm = MutableStateFlow<Int?>(null) // null = no filter
+    val selectedRadiusKm: StateFlow<Int?> = _selectedRadiusKm.asStateFlow()
 
-    init {
-        loadMockMarkers()
-    }
+    // ── State: Route Builder selections ────────────────────────────
+    private val _routeWaypoints = MutableStateFlow<List<AppLocation>>(emptyList())
+    val routeWaypoints: StateFlow<List<AppLocation>> = _routeWaypoints.asStateFlow()
 
-    /**
-     * Seeds the map with mock markers across different transport tags.
-     * In the final MVP, these will be replaced by real data from the backend.
-     */
-    private fun loadMockMarkers() {
-        _allMarkers.value = listOf(
-            MarkerItem(
-                title = "Warehouse A \u2013 Entrance",
-                snippet = "Walking entrance for pedestrians",
-                latitude = 50.4501,
-                longitude = 30.5234,
-                tag = "Walking"
-            ),
-            MarkerItem(
-                title = "Warehouse A \u2013 Bike Rack",
-                snippet = "Bicycle parking and docking station",
-                latitude = 50.4507,
-                longitude = 30.5240,
-                tag = "Bicycle"
-            ),
-            MarkerItem(
-                title = "Warehouse A \u2013 Loading Bay",
-                snippet = "Vehicle loading/unloading zone",
-                latitude = 50.4498,
-                longitude = 30.5228,
-                tag = "Car"
-            ),
-            MarkerItem(
-                title = "Courier Hub \u2013 Entrance",
-                snippet = "Main pedestrian entrance to courier hub",
-                latitude = 50.4515,
-                longitude = 30.5255,
-                tag = "Walking"
-            ),
-            MarkerItem(
-                title = "Courier Hub \u2013 Parking",
-                snippet = "Car parking for courier vehicles",
-                latitude = 50.4510,
-                longitude = 30.5262,
-                tag = "Car"
-            ),
-            MarkerItem(
-                title = "Courier Hub \u2013 Bike Lane",
-                snippet = "Dedicated bicycle lane access point",
-                latitude = 50.4520,
-                longitude = 30.5250,
-                tag = "Bicycle"
-            ),
-            MarkerItem(
-                title = "Underground Facility \u2013 Stairs B1",
-                snippet = "Walking access to basement level B1",
-                latitude = 50.4495,
-                longitude = 30.5230,
-                tag = "Walking"
-            ),
-            MarkerItem(
-                title = "Underground Facility \u2013 Ramp",
-                snippet = "Vehicle ramp to basement parking",
-                latitude = 50.4492,
-                longitude = 30.5225,
-                tag = "Car"
+    // ── State: Visual Search Mock Result ──────────────────────────
+    private val _mockMatchLocation = MutableStateFlow<AppLocation?>(null)
+    val mockMatchLocation: StateFlow<AppLocation?> = _mockMatchLocation.asStateFlow()
+
+    // ── Analytics (computed) ───────────────────────────────────────
+    data class AnalyticsData(
+        val categoryCounts: Map<String, Int>,
+        val visitedCount: Int,
+        val notVisitedCount: Int,
+        val totalCount: Int
+    )
+
+    val analyticsData: StateFlow<AnalyticsData> =
+        allLocations.combine(MutableStateFlow(Unit)) { locations, _ ->
+            val categoryCounts = locations.groupBy { it.category }.mapValues { it.value.size }
+            val visitedCount = locations.count { it.isVisited }
+            AnalyticsData(
+                categoryCounts = categoryCounts,
+                visitedCount = visitedCount,
+                notVisitedCount = locations.size - visitedCount,
+                totalCount = locations.size
             )
-        )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000),
+            AnalyticsData(emptyMap(), 0, 0, 0))
+
+    // ── Public API ─────────────────────────────────────────────────
+
+    /** Set the active category filter. Pass `null` to show all. */
+    fun setCategoryFilter(category: String?) {
+        _selectedCategory.value = category
     }
 
-    // ── Public API ───────────────────────────────────────────────
-
-    /**
-     * Sets the current filter tag.
-     *
-     * @param tag The tag to filter by. Pass `null` or [MarkerItem.TAG_ALL] to show all markers.
-     */
-    fun setFilter(tag: String?) {
-        _selectedTag.value = tag
+    /** Set the radius filter in km. Pass `null` to clear. */
+    fun setRadiusFilter(radiusKm: Int?) {
+        _selectedRadiusKm.value = radiusKm
     }
 
-    /**
-     * Adds a new marker at the given coordinates.
-     * The marker is assigned the currently selected tag (or "Walking" if "All" is active).
-     *
-     * @param latitude  WGS‑84 latitude.
-     * @param longitude WGS‑84 longitude.
-     */
-    fun addMarker(latitude: Double, longitude: Double) {
-        val currentTag = _selectedTag.value
-        val assignedTag = when {
-            currentTag == null || currentTag == MarkerItem.TAG_ALL -> "Walking"
-            else -> currentTag
+    /** Insert a new location (Map → Add flow). */
+    fun addLocation(
+        title: String,
+        description: String,
+        latitude: Double,
+        longitude: Double,
+        category: String,
+        imageUri: String
+    ) {
+        viewModelScope.launch {
+            repository.insertLocation(
+                AppLocation(
+                    title = title,
+                    description = description,
+                    latitude = latitude,
+                    longitude = longitude,
+                    category = category,
+                    imageUri = imageUri
+                )
+            )
         }
-
-        val newMarker = MarkerItem(
-            title = "Delivery Point",
-            snippet = "Tag: $assignedTag \u2014 Tap to edit",
-            latitude = latitude,
-            longitude = longitude,
-            tag = assignedTag
-        )
-
-        _allMarkers.value = _allMarkers.value + newMarker
     }
 
-    /**
-     * Removes a marker by its ID.
-     */
-    fun removeMarker(markerId: String) {
-        _allMarkers.value = _allMarkers.value.filter { it.id != markerId }
+    /** Update an existing location. */
+    fun updateLocation(location: AppLocation) {
+        viewModelScope.launch { repository.updateLocation(location) }
     }
 
+    /** Delete a location by ID. */
+    fun deleteLocation(id: Int) {
+        viewModelScope.launch { repository.deleteLocation(id) }
+    }
+
+    /** Toggle the visited flag. */
+    fun toggleVisited(id: Int) {
+        viewModelScope.launch { repository.toggleVisited(id) }
+    }
+
+    // ── Route Builder ──────────────────────────────────────────────
+
+    /** Toggle a location in/out of the route waypoint list. */
+    fun toggleRouteWaypoint(location: AppLocation) {
+        val current = _routeWaypoints.value.toMutableList()
+        if (current.any { it.id == location.id }) {
+            _routeWaypoints.value = current.filter { it.id != location.id }
+        } else {
+            _routeWaypoints.value = current + location
+        }
+    }
+
+    fun clearRouteWaypoints() {
+        _routeWaypoints.value = emptyList()
+    }
+
+    // ── Visual Search Mock ─────────────────────────────────────────
+
     /**
-     * Returns the total count of placed markers.
+     * Stores a mock match result. Called by [com.navisense.ui.search.VisualSearchFragment]
+     * after the 2-second loading spinner completes.
      */
-    fun markerCount(): Int = _allMarkers.value.size
+    fun setMockMatchResult(location: AppLocation) {
+        _mockMatchLocation.value = location
+    }
+
+    fun clearMockMatchResult() {
+        _mockMatchLocation.value = null
+    }
 }

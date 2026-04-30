@@ -78,6 +78,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-common-java8:2.7.0")
 
+    // ── Navigation Component ───────────────────────────────────────
+    implementation("androidx.navigation:navigation-fragment-ktx:2.7.7")
+    implementation("androidx.navigation:navigation-ui-ktx:2.7.7")
+
     // ── Google Maps SDK ────────────────────────────────────────────
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.maps.android:maps-utils-ktx:5.0.0")
@@ -98,6 +102,9 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.4.1")
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
+
+    // ── Image Loading (Coil) ───────────────────────────────────────
+    implementation("io.coil-kt:coil:2.5.0")
 
     // ── Testing ────────────────────────────────────────────────────
     testImplementation("junit:junit:4.13.2")

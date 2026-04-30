@@ -3,7 +3,14 @@
     <!-- App -->
     <string name="app_name">NaviSense</string>
 
-    <!-- Search -->
+    <!-- Bottom Navigation Tabs -->
+    <string name="tab_map">Map</string>
+    <string name="tab_routes">Routes</string>
+    <string name="tab_add">Add</string>
+    <string name="tab_analytics">Analytics</string>
+    <string name="tab_visual_search">Visual Search</string>
+
+    <!-- Search (legacy) -->
     <string name="search_hint">Search delivery points…</string>
 
     <!-- Filter Chips -->
@@ -12,19 +19,70 @@
     <string name="filter_bicycle">Bicycle</string>
     <string name="filter_car">Car</string>
 
-    <!-- Map Interactions -->
-    <string name="marker_added">📍 Marker added (%.4f, %.4f)</string>
+    <!-- Map Screen -->
+    <string name="my_location">My Location</string>
+    <string name="radius_label">Radius:</string>
+    <string name="radius_off">Off</string>
+    <string name="match_found">Match Found!</string>
+
+    <!-- Map Interactions (legacy) -->
+    <string name="marker_added">📍 Marker added (%1$.4f, %2$.4f)</string>
     <string name="marker_removed">🗑️ Marker removed</string>
 
     <!-- Permissions -->
     <string name="permission_location_denied">Location permission is needed to show your position on the map.</string>
     <string name="permission_camera_denied">Camera permission is needed for visual positioning.</string>
 
-    <!-- Info Window Defaults -->
+    <!-- Info Window Defaults (legacy) -->
     <string name="marker_title_delivery_point">Delivery Point</string>
     <string name="marker_snippet_format">Tag: %s — Tap to edit</string>
 
-    <!-- Toast Messages -->
+    <!-- Location Details BottomSheet -->
+    <string name="mark_as_visited">Mark as Visited</string>
+    <string name="visited_already">Already Visited</string>
+    <string name="delete">Delete</string>
+
+    <!-- Add Location Screen -->
+    <string name="add_location_title">Add New Location</string>
+    <string name="title_hint">Title</string>
+    <string name="description_hint">Description</string>
+    <string name="category_hint">Category</string>
+    <string name="attach_photo">Attach Photo</string>
+    <string name="save">Save</string>
+    <string name="gallery">Gallery</string>
+    <string name="camera">Camera</string>
+    <string name="selected_position">Selected Position</string>
+    <string name="coords_format">%1$.6f, %2$.6f</string>
+    <string name="required_field">This field is required</string>
+    <string name="select_coords">Please tap on the map to select coordinates</string>
+    <string name="location_saved">Location saved successfully!</string>
+
+    <!-- Route Builder Screen -->
+    <string name="route_waypoints">Waypoints</string>
+    <string name="route_waypoint">Waypoint %d</string>
+    <string name="route_instruction">Tap a location to add it as a waypoint. First = Start, Last = End.</string>
+    <string name="route_start">Start Point</string>
+    <string name="route_end">End Point</string>
+    <string name="start_navigation">Start Navigation</string>
+    <string name="clear">Clear</string>
+    <string name="route_empty">Please add at least one waypoint before starting navigation</string>
+
+    <!-- Visual Search Screen -->
+    <string name="visual_search_title">Find by Photo</string>
+    <string name="visual_search_description">Upload or take a photo to find matching locations using AI visual search.</string>
+    <string name="upload_photo">Upload Photo</string>
+    <string name="take_photo">Take Photo</string>
+    <string name="searching">Searching…</string>
+    <string name="match_found_title">Visual Match</string>
+    <string name="match_found_description">Found via AI visual search</string>
+
+    <!-- Analytics Screen -->
+    <string name="analytics_title">Analytics</string>
+    <string name="category_distribution">Category Distribution</string>
+    <string name="visited_stats">Visited vs Not Visited</string>
+    <string name="total_locations">Total Locations</string>
+
+    <!-- Toast Messages (legacy) -->
     <string name="toast_no_internet">No internet connection. Please check your network.</string>
     <string name="toast_backend_unavailable">Backend is not available. Retrying…</string>
 </resources>
