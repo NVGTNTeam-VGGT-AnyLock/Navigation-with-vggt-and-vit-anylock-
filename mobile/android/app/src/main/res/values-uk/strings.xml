@@ -3,7 +3,14 @@
     <!-- App -->
     <string name="app_name">NaviSense</string>
 
-    <!-- Search -->
+    <!-- Bottom Navigation Tabs -->
+    <string name="tab_map">Карта</string>
+    <string name="tab_routes">Маршрути</string>
+    <string name="tab_add">Додати</string>
+    <string name="tab_analytics">Аналітика</string>
+    <string name="tab_visual_search">Візуальний пошук</string>
+
+    <!-- Search (legacy) -->
     <string name="search_hint">Пошук точок доставки…</string>
 
     <!-- Filter Chips -->
@@ -12,19 +19,70 @@
     <string name="filter_bicycle">Велосипед</string>
     <string name="filter_car">Автомобіль</string>
 
-    <!-- Map Interactions -->
-    <string name="marker_added">📍 Маркер додано (%.4f, %.4f)</string>
+    <!-- Map Screen -->
+    <string name="my_location">Моє місцезнаходження</string>
+    <string name="radius_label">Радіус:</string>
+    <string name="radius_off">Вимк.</string>
+    <string name="match_found">Знайдено збіг!</string>
+
+    <!-- Map Interactions (legacy) -->
+    <string name="marker_added">📍 Маркер додано (%1$.4f, %2$.4f)</string>
     <string name="marker_removed">🗑️ Маркер видалено</string>
 
     <!-- Permissions -->
     <string name="permission_location_denied">Для відображення вашого положення на карті потрібен дозвіл на геолокацію.</string>
     <string name="permission_camera_denied">Для візуального позиціонування потрібен дозвіл на камеру.</string>
 
-    <!-- Info Window Defaults -->
+    <!-- Info Window Defaults (legacy) -->
     <string name="marker_title_delivery_point">Точка доставки</string>
     <string name="marker_snippet_format">Тег: %s — Натисніть для редагування</string>
 
-    <!-- Toast Messages -->
+    <!-- Location Details BottomSheet -->
+    <string name="mark_as_visited">Позначити відвіданим</string>
+    <string name="visited_already">Вже відвідано</string>
+    <string name="delete">Видалити</string>
+
+    <!-- Add Location Screen -->
+    <string name="add_location_title">Додати нову локацію</string>
+    <string name="title_hint">Назва</string>
+    <string name="description_hint">Опис</string>
+    <string name="category_hint">Категорія</string>
+    <string name="attach_photo">Прикріпити фото</string>
+    <string name="save">Зберегти</string>
+    <string name="gallery">Галерея</string>
+    <string name="camera">Камера</string>
+    <string name="selected_position">Вибрана позиція</string>
+    <string name="coords_format">%1$.6f, %2$.6f</string>
+    <string name="required_field">Це поле обов\'язкове</string>
+    <string name="select_coords">Будь ласка, торкніться карти, щоб вибрати координати</string>
+    <string name="location_saved">Локацію успішно збережено!</string>
+
+    <!-- Route Builder Screen -->
+    <string name="route_waypoints">Точки маршруту</string>
+    <string name="route_waypoint">Точка %d</string>
+    <string name="route_instruction">Торкніться локації, щоб додати її як точку маршруту. Перша = Старт, Остання = Фініш.</string>
+    <string name="route_start">Початкова точка</string>
+    <string name="route_end">Кінцева точка</string>
+    <string name="start_navigation">Почати навігацію</string>
+    <string name="clear">Очистити</string>
+    <string name="route_empty">Будь ласка, додайте хоча б одну точку маршруту</string>
+
+    <!-- Visual Search Screen -->
+    <string name="visual_search_title">Знайти за фото</string>
+    <string name="visual_search_description">Завантажте або зробіть фото, щоб знайти відповідні локації за допомогою AI візуального пошуку.</string>
+    <string name="upload_photo">Завантажити фото</string>
+    <string name="take_photo">Зробити фото</string>
+    <string name="searching">Пошук…</string>
+    <string name="match_found_title">Візуальний збіг</string>
+    <string name="match_found_description">Знайдено за допомогою AI пошуку</string>
+
+    <!-- Analytics Screen -->
+    <string name="analytics_title">Аналітика</string>
+    <string name="category_distribution">Розподіл за категоріями</string>
+    <string name="visited_stats">Відвідано vs Не відвідано</string>
+    <string name="total_locations">Усього локацій</string>
+
+    <!-- Toast Messages (legacy) -->
     <string name="toast_no_internet">Немає підключення до інтернету. Перевірте мережу.</string>
     <string name="toast_backend_unavailable">Бекенд недоступний. Повторна спроба…</string>
 </resources>

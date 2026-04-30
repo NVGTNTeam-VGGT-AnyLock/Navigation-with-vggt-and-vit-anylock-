@@ -1,6 +1,34 @@
 [
     {
-        "merged": "com.navisense.app-mergeDebugResources-3:/layout/activity_main.xml",
-        "source": "com.navisense.app-main-6:/layout/activity_main.xml"
+        "merged": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-mergeDebugResources-3:\\layout\\fragment_route_builder.xml",
+        "source": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-main-6:\\layout\\fragment_route_builder.xml"
+    },
+    {
+        "merged": "com.navisense.app-mergeDebugResources-3:/layout/fragment_route_builder.xml",
+        "source": "com.navisense.app-main-6:/layout/fragment_route_builder.xml"
+    },
+    {
+        "merged": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-mergeDebugResources-3:\\layout\\activity_main.xml",
+        "source": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-main-6:\\layout\\activity_main.xml"
+    },
+    {
+        "merged": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-mergeDebugResources-3:\\layout\\fragment_add_location.xml",
+        "source": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-main-6:\\layout\\fragment_add_location.xml"
+    },
+    {
+        "merged": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-mergeDebugResources-3:\\layout\\bottom_sheet_location_details.xml",
+        "source": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-main-6:\\layout\\bottom_sheet_location_details.xml"
+    },
+    {
+        "merged": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-mergeDebugResources-3:\\layout\\fragment_analytics.xml",
+        "source": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-main-6:\\layout\\fragment_analytics.xml"
+    },
+    {
+        "merged": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-mergeDebugResources-3:\\layout\\fragment_map.xml",
+        "source": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-main-6:\\layout\\fragment_map.xml"
+    },
+    {
+        "merged": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-mergeDebugResources-3:\\layout\\fragment_visual_search.xml",
+        "source": "D:\\Android\\.gradle\\daemon\\8.5\\com.navisense.app-main-6:\\layout\\fragment_visual_search.xml"
     }
 ]
