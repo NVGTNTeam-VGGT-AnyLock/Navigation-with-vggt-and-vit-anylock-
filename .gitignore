@@ -1,16 +1,5 @@
-# Compiled class file
+# ── Compiled / Build Artifacts ──────────────────────────────────────
 *.class
-
-# Log file
-*.log
-
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
 *.jar
 *.war
 *.nar
@@ -19,9 +8,78 @@
 *.tar.gz
 *.rar
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+# ── Logs & Crash Reports ───────────────────────────────────────────
+*.log
 hs_err_pid*
 replay_pid*
 
-# Kotlin Gradle plugin data, see https://kotlinlang.org/docs/whatsnew20.html#new-directory-for-kotlin-data-in-gradle-projects
+# ── IDE / Editor ───────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+.mtj.tmp/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS Files ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ── Android / Gradle ───────────────────────────────────────────────
+*.apk
+*.aab
+*.ap_
+*.dex
+*.jks
+*.keystore
+local.properties
+.gradle/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+*.symbols
+*.merged_native_libs
+*.stripped_native_libs
+
+# ── Kotlin Gradle Plugin ────────────────────────────────────────────
 .kotlin/
+
+# ── Python / ML ─────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.env
+.venv.bak/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+pytest_cache/
+.ruff_cache/
+
+# ── BlueJ (legacy) ──────────────────────────────────────────────────
+*.ctxt
+
+# ── JVM Crash Logs ─────────────────────────────────────────────────
+# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
