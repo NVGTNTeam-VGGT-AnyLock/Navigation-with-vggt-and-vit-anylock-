@@ -10,59 +10,120 @@ NaviSense is a visual positioning mobile application designed for couriers opera
 
 ---
 
-## 2. Tech Stack (Planned Full Stack)
+## 2. Tech Stack (Current & Planned)
 
 ### Mobile Frontend
 - **Platform:** Native Android (minimum SDK 26, target SDK 34)
 - **Language:** Kotlin (no cross‑platform frameworks)
+- **Architecture:** Single‑Activity with Navigation Component + BottomNavigationView (5 tabs)
 - **Key Libraries:**
+  - **Navigation Component 2.7.7** — fragment-based navigation with `NavHostFragment` and Bottom Navigation
   - **CameraX 1.4.1** for single‑frame image capture
     - Resolution selector targeting 1080×1920 (portrait)
     - Capture mode: `MINIMIZE_LATENCY`
     - Built‑in `ImageProxy.toBitmap()` (CameraX 1.4+)
   - **Google Maps SDK (play-services-maps:18.2.0)** for map display
+  - **Maps-Utils-KTx (5.0.0)** for enhanced map utilities
+  - **Play Services Location (21.1.0)** for FusedLocationProviderClient
   - **Retrofit2 + OkHttp4** for REST communication
     - Base URL configurable via `BuildConfig.BACKEND_URL`
-    - Timeout: 10 seconds connect, 30 seconds read
+    - Timeout: 15 seconds connect, 30 seconds read/write
     - Multipart file upload with JPEG compression quality 85%
-  - **Room** for local caching *(planned — not yet implemented)*
-  - **OpenCV‑Android** for lightweight blur‑detection *(not used; custom Kotlin Laplacian variance used instead)*
+    - Logging interceptor (HTTP body logging in debug)
+  - **Coil 2.5.0** for image loading
+  - **Room** for local caching *(planned — not yet implemented; `build.gradle.kts` does not include Room dependency)*
+  - **Material3** for UI components (chips, cards, bottom sheets, bottom navigation)
+  - OpenCV‑Android *not used* — custom Kotlin Laplacian variance used for blur detection
 
 ### Backend
 - **Runtime:** Python 3.10+
-- **Web Framework:** FastAPI (ASGI, automatic OpenAPI docs)
+- **Web Framework:** FastAPI (ASGI, automatic OpenAPI docs at `/docs`)
 - **ML/DL Stack:**
-  - PyTorch 2.0+ (with GPU support if available)
-  - Hugging Face Transformers (DINOv2‑base model for feature extraction)
+  - PyTorch 2.11.0 (with GPU support if available)
+  - Hugging Face Transformers 4.35.0 (DINOv2‑base model for feature extraction)
     - Model variant: `facebook/dinov2‑base` (ViT‑B/14)
     - Input resolution: 224×224 pixels, normalized with ImageNet mean/std
-    - Output feature dimension: 768‑dimensional vector
+    - Output feature dimension: 768‑dimensional vector, L2-normalized
     - Inference device: GPU if available, otherwise CPU with FP16 precision
-  - FAISS (Facebook AI Similarity Search) for vector search
+  - FAISS (cpu 1.13.2) for vector search
     - Index type: `IndexFlatL2` (exact L2 distance) for up to 100k landmarks; `IndexIVFFlat` for larger datasets
     - Dimension: 768 (matches DINOv2 output)
     - Metric: L2 (Euclidean) distance
     - Index built offline from landmark feature vectors; stored as binary file loaded at startup
+  - **Mock fallback mode** — if torch/transformers/faiss are unavailable, the backend auto-falls back to mock implementations returning random positions
 - **Utilities:**
   - Pillow/PIL for image preprocessing
   - NumPy, SciPy for numerical operations
   - Uvicorn as ASGI server
-  - Redis (optional) for caching feature vectors
+  - python-multipart for file uploads
+  - pydantic for data validation
+  - python-dotenv for environment configuration
+  - httpx for async HTTP testing
+  - pytest + pytest-asyncio for testing
 - **API Endpoints:**
-  - `POST /api/v1/position` – upload a JPEG image; returns JSON with `latitude`, `longitude`, `floor`, `confidence`.
-  - `GET /api/v1/health` – returns `{"status": "ok"}` if backend is ready.
-  - `POST /api/v1/calibrate` – (optional) upload a calibration image to adjust blur‑detection threshold.
+  - `GET /` — root welcome message
+  - `GET /api/v1/health` — returns `{"status": "ok"}` if backend is ready.
+  - `POST /api/v1/position` — upload a JPEG image (max 5 MB); returns JSON with `latitude`, `longitude`, `floor`, `confidence`, `nearest_landmarks`.
+  - `POST /api/v1/calibrate` — (placeholder) upload a calibration image to adjust blur‑detection threshold; returns `{"message": "Calibration endpoint (not implemented)"}`.
 
 ### Infrastructure & DevOps
 - **Version Control:** Git with GitHub Gitflow branching model
 - **CI/CD:** GitHub Actions (build, test, deploy) — *(planned)*
-- **Containerization:** Docker, Docker‑Compose for local development
-- **Database:** PostgreSQL 14+ (for metadata, user sessions, landmark catalog) — *(planned — backend not yet deployed)*
+- **Containerization:** Docker (see [`backend/Dockerfile`](backend/Dockerfile))
+- **Database:** PostgreSQL 14+ (for metadata, user sessions, landmark catalog) — *(planned)*
 - **Cloud Provider:** AWS / GCP (TBD)
 
 ---
 
-## 3. Architecture Flow (Full Vision)
+## 3. Architecture — Current State
+
+The app has evolved from a single-screen MVP into a multi-tab Location Management application with a clean fragment-based architecture.
+
+```mermaid
+graph TD
+    subgraph "Mobile App (Navigation Component)"
+        A[MainActivity] --> B[NavHostFragment]
+        B --> C[MapFragment]
+        B --> D[RouteBuilderFragment]
+        B --> E[AddLocationFragment]
+        B --> F[AnalyticsFragment]
+        B --> G[VisualSearchFragment]
+    end
+
+    subgraph "Shared ViewModel"
+        H[MainViewModel] --> I[LocationRepository]
+        I --> J[MockLocationRepositoryImpl]
+        H --> K[analyticsData]
+        H --> L[routeWaypoints]
+        H --> M[filteredLocations]
+    end
+
+    subgraph "Unwired Core Services (Sprint 3+)"
+        N[ScannerCamera] --> O[FileManagerService]
+        O --> P[TempScans/ Folder]
+        N --> Q[Laplacian Blur Detection]
+        R[LocalizationApiClient] --> S[Retrofit -> NaviSenseApi]
+        S --> T[POST /api/v1/position]
+    end
+
+    C --> H
+    D --> H
+    E --> H
+    F --> H
+    G --> H
+```
+
+### Tab Overview
+
+| # | Tab | Fragment | Description |
+|---|-----|----------|-------------|
+| 1 | Map (Home) | [`MapFragment`](mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt) | Full‑screen Google Map with category filter chips (All, Monument, Grocery, etc.), radius filter (1/2/5/10 km), My‑Location FAB, location markers with colored icons by category, mock match marker drop |
+| 2 | Routes | [`RouteBuilderFragment`](mobile/android/app/src/main/java/com/navisense/ui/route/RouteBuilderFragment.kt) | Split view: map (top) + selectable waypoint list (bottom). Polyline connects selected waypoints; "Start Navigation" launches Google Maps external app to final destination |
+| 3 | Add (+) | [`AddLocationFragment`](mobile/android/app/src/main/java/com/navisense/ui/add/AddLocationFragment.kt) | Map picker + form (title, description, category dropdown, photo attachment from gallery/camera). Saves via ViewModel → Repository |
+| 4 | Analytics | [`AnalyticsFragment`](mobile/android/app/src/main/java/com/navisense/ui/analytics/AnalyticsFragment.kt) | Custom Canvas-drawn PieChart (category distribution) + BarChart (visited vs not visited) + total location count |
+| 5 | Visual Search | [`VisualSearchFragment`](mobile/android/app/src/main/java/com/navisense/ui/search/VisualSearchFragment.kt) | Upload or take a photo → 2‑second loading spinner (mocking ML inference) → navigates to Map and drops a yellow mock-match marker |
+
+### Full Vision Flow (Camera → Backend → Position)
 
 ```mermaid
 graph TD
@@ -76,37 +137,19 @@ graph TD
     H --> I[Extract Features with DINOv2];
     I --> J[FAISS Vector Search];
     J --> K[Retrieve Top‑K Landmarks];
-    K --> L[Compute Position Estimate];
+    K --> L[Compute Weighted Position];
     L --> M[Return Position to Mobile];
     M --> N[Delete Temporary Image];
     N --> O[Update UI with Position];
 ```
 
-**Detailed Steps (Full Vision):**
-
-1. **Frame Capture:** Mobile camera captures a single RGB frame (resolution 1080×1920) via CameraX.
-2. **Edge Validation:** A lightweight blur‑detection algorithm (Laplacian variance) runs on‑device. If the frame is too blurry, it is discarded immediately; no file I/O or network call occurs.
-3. **Storage Check:** Before writing to disk, the app verifies that at least 50 MB of free space is available on the device's internal storage. If not, the operation is aborted and an error is logged.
-4. **Temporary Storage:** The validated frame is saved as a JPEG file in `[App Internal Storage]/TempScans/` with a UUID filename.
-5. **Network Transmission:** The file is uploaded via a multipart POST request to `/api/v1/position` (FastAPI endpoint).
-6. **Backend Processing:**
-   - Image is resized and normalized to match DINOv2 input requirements (224×224).
-   - DINOv2‑base extracts a 768‑dimensional feature vector.
-   - The vector is searched against a pre‑built FAISS index of landmark feature vectors (landmarks are geo‑referenced images of the environment).
-   - The top‑K nearest neighbours are retrieved, and a weighted average of their coordinates yields the estimated position.
-7. **Response:** The estimated (latitude, longitude, floor) is returned as JSON.
-8. **Cleanup:** Upon successful receipt of the response, the mobile app deletes the temporary JPEG file. If the transmission fails, the file is kept for retry (up to 3 attempts) before being deleted and logged as an error.
-9. **UI Update:** The mobile UI displays the position on a floor plan (map tile) and optionally provides turn‑by‑turn navigation instructions.
-
-> **Sprint 1 note:** Steps 1–2 (CameraX + blur detection) are implemented in [`ScannerCamera.kt`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt) but not yet wired into the UI. Steps 3–9 are planned for Sprint 2.
+> **Current state:** Steps 1–2 (CameraX + blur detection) are implemented in [`ScannerCamera.kt`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt) but **not wired** into any fragment. Steps 3–9 are fully implemented in the backend but the mobile → backend integration (`LocalizationApiClient`) is also **not wired**.
 
 ---
 
-## 4. Database Schema (Planned)
+## 4. Database Schema (Planned — PostgreSQL)
 
 ```sql
--- PostgreSQL tables (planned — not yet deployed)
-
 -- Registered couriers
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -183,12 +226,12 @@ CREATE TABLE buildings (
 
 ### 5.3 Edge Validation (Blur Detection)
 - Every captured frame must undergo a blur‑detection test before hitting the file system or network.
-- **Algorithm:** Compute the Laplacian variance of the grayscale version of the image. If the variance is below a calibrated threshold (determined per‑device during calibration), the frame is considered too blurry and is discarded.
+- **Algorithm:** Compute the Laplacian variance of the grayscale version of the image. If the variance is below a calibrated threshold (default: 100.0), the frame is considered too blurry and is discarded.
 - **Performance:** The blur‑detection routine must complete in < 100 ms on a mid‑range Android device.
 
 ### 5.4 Error Handling & Logging
 - **Error Logs:** All runtime errors (I/O, network, validation failures) must be appended to `error_logs.txt` in the app's internal storage, with a timestamp, error code, and brief description.
-- **Retry Logic:** Network requests that timeout or return 5xx status codes are retried up to 3 times with exponential backoff.
+- **Retry Logic:** Network requests that timeout or return 5xx status codes are retried up to 3 times with exponential backoff (1s → 2s → 4s).
 - **User Feedback:** Non‑technical errors (e.g., "image too blurry", "insufficient storage") are displayed as user‑friendly toasts; technical errors are logged silently.
 
 ### 5.5 Security & Privacy
@@ -214,39 +257,69 @@ CREATE TABLE buildings (
 
 ---
 
-## 7. Current Implementation Status (Sprint 1)
+## 7. Current Implementation Status
 
-### 7.1 Sprint 1 Scope
-Sprint 1 delivered a functional Android UI shell with Google Maps integration, runtime permission handling, mock marker placement, and bilingual (EN/UK) resources. The ML backend pipeline (CameraX capture, backend upload, DINOv2 feature extraction, FAISS search) is **not yet wired into the UI** and remains planned for Sprint 2.
+### 7.1 Sprint Overview
+
+The project has evolved through two major phases:
+
+- **Sprint 1 (Complete):** Delivered a single-screen UI shell with Google Maps integration, runtime permission handling, mock marker placement, CameraX capture module, FileManagerService, LocalizationApiClient, and bilingual (EN/UK) resources. Much of this remains unwired.
+
+- **Sprint 2 (In Progress / Near Complete):** Refactored the monolithic `MainActivity` into a **5-tab Navigation Component** architecture. Implemented `MapFragment`, `AddLocationFragment`, `RouteBuilderFragment`, `AnalyticsFragment`, `VisualSearchFragment`, shared `MainViewModel` with `LocationRepository` pattern, `AppLocation`/`AppLocationCategory` models, custom chart views, and mock visual search flow. Backend received full ML pipeline (DINOv2 + FAISS) with mock fallback mode and Docker support.
 
 ### 7.2 What Works (Verified)
 
+#### Sprint 1 Features (Carried Forward)
+
 | Feature | Status | Details |
 |---|---|---|
-| **Runtime Permissions** | ✅ Working | `ActivityResultContracts.RequestMultiplePermissions()` requests **CAMERA** + **ACCESS_FINE_LOCATION** + **ACCESS_COARSE_LOCATION** immediately on launch. All four grant/deny combinations handled with user‑friendly toasts. |
-| **Google Maps Display** | ✅ Working | `SupportMapFragment` renders map tiles (requires valid API key with "Maps SDK for Android" enabled in Google Cloud Console). Default camera centres on Kyiv (50.4501, 30.5234) at zoom 15. |
-| **Map UI Controls** | ✅ Working | Zoom controls (`+`/`–` buttons) enabled. Map toolbar (Google branding, open‑in‑Maps) disabled for MVP simplicity. |
-| **Tap‑to‑Add Marker** | ✅ Working | Tapping the map creates a new `MarkerItem` at the tapped coordinates. Marker tag auto‑assigned based on currently selected filter chip (defaults to "All" → no tag). Toast confirms coordinates. |
-| **Marker Info Window** | ✅ Working | Tapping a marker opens its info window showing title + snippet. |
-| **Info‑Window Tap to Delete** | ✅ Working | Tapping the info window removes the marker. Toast confirms deletion. |
-| **Search Bar** | ✅ Working | `TextWatcher` on the search `EditText` filters displayed markers in real‑time by title, snippet, and tag (case‑insensitive). |
-| **Bilingual UI** | ✅ Working | Full English (`values/`) and Ukrainian (`values‑uk/`) string resources for all UI labels, toasts, and permission messages. |
-| **Marker Tag Colors** | ✅ Working | Walking = Green (`HUE_GREEN`), Bicycle = Azure (`HUE_AZURE`), Car = Orange (`HUE_ORANGE`), default = Red (`HUE_RED`). |
-| **CameraX ScannerCamera** | ✅ Implemented (not wired) | [`ScannerCamera.kt`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt) is fully built: `ResolutionSelector`, Laplacian variance blur detection, `captureSharpImage()` callback. Ready to integrate in Sprint 2. |
-| **FileManagerService** | ✅ Implemented (not wired) | [`FileManagerService.kt`](mobile/android/app/src/main/java/com/navisense/core/FileManagerService.kt) provides TempScans folder, 50 MB free‑space check, UUID file naming, error logging. Ready for Sprint 2. |
-| **LocalizationApiClient** | ✅ Implemented (not wired) | [`LocalizationApiClient.kt`](mobile/android/app/src/main/java/com/navisense/core/LocalizationApiClient.kt) provides Retrofit client, multipart image upload, response parsing. Ready for Sprint 2. |
+| **Google Maps Display** | ✅ Working | `SupportMapFragment` renders map tiles in `MapFragment`. Default camera centres on Kyiv (50.4501, 30.5234) at zoom 13. |
+| **Map UI Controls** | ✅ Working | Zoom controls (`+`/`–` buttons) enabled. Map toolbar disabled for MVP simplicity. |
+| **CameraX ScannerCamera** | ✅ Implemented (not wired) | [`ScannerCamera.kt`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt): `ResolutionSelector`, Laplacian variance blur detection (threshold 100.0), `captureSharpImage()` callback, `ImageTooBlurryException`. **Not instantiated in any fragment.** |
+| **FileManagerService** | ✅ Implemented (not wired) | [`FileManagerService.kt`](mobile/android/app/src/main/java/com/navisense/core/FileManagerService.kt): TempScans folder, 50 MB free‑space check, UUID file naming, error logging, `prepareImagePart()` for Retrofit multipart upload. **Not called from any fragment.** |
+| **LocalizationApiClient** | ✅ Implemented (not wired) | [`LocalizationApiClient.kt`](mobile/android/app/src/main/java/com/navisense/core/LocalizationApiClient.kt): Retrofit client, OkHttp timeouts (15s/30s/30s), retry logic (3 attempts with exponential backoff), file cleanup after success/failure. **Not called from any fragment.** |
+| **NaviSenseApi** | ✅ Implemented (not wired) | [`NaviSenseApi.kt`](mobile/android/app/src/main/java/com/navisense/core/NaviSenseApi.kt): Retrofit interface with `uploadImage()` multipart endpoint. `PositionResponse` and `Landmark` data classes. |
+| **Bilingual UI** | ✅ Working | Full English (`values/`) and Ukrainian (`values‑uk/`) string resources for all UI labels and messages. |
 
-### 7.3 Known Issues / Not Yet Working
+#### Sprint 2 Features (New)
 
-| Issue | Impact | Root Cause / Notes |
+| Feature | Status | Details |
 |---|---|---|
-| **Filter Chips (ChipGroup) are non‑functional** | ❌ Markers do **not** filter when a transport‑mode chip (Walking, Bicycle, Car) is selected. The chips render and are selectable, but the marker list remains unchanged. | The `ViewModel.selectedTag` StateFlow or its combination with `_markers` in `filteredMarkers` may have a logic gap. The `setFilter(tag)` call updates the state, but the derived `filteredMarkers` flow may not be correctly combining the tag with the marker list. **Priority fix for Sprint 2.** |
-| **User geolocation blue dot not showing** | ❌ The My‑Location layer (`map.isMyLocationEnabled = true`) and `FusedLocationProviderClient` for camera animation are implemented, but the blue dot does not appear after granting location permission. | Likely causes: (a) `FusedLocationProviderClient.lastLocation` returns `null` on first launch (no cached location), (b) the `isMapReady` guard fires before `getMapAsync` completes in some sequences, or (c) the location permission callback races with map initialisation. Also depends on a valid Google Maps API key for full tile rendering. |
-| **CameraX not wired into UI** | N/A (Sprint 2) | `ScannerCamera` is fully implemented but not instantiated in `MainActivity`. The permission launcher has `// Sprint 2: initCameraX()` placeholder comments. |
-| **ML Backend not deployed** | N/A (Sprint 2) | Backend code exists in [`backend/`](backend/) but is not running on a server. `LocalizationApiClient` will fail to connect. |
-| **16 KB page‑size alignment (Android 15)** | ⚠️ Fixed (verify) | CameraX 1.4.1 + `packaging { jniLibs { useLegacyPackaging = true } }` added. Run `./gradlew clean assembleDebug` to purge cached 4 KB‑aligned libraries. |
+| **Navigation Component + Bottom Nav** | ✅ Fully Implemented | 5-tab navigation: Map, Routes, Add, Analytics, Visual Search. [`NavHostFragment`](mobile/android/app/src/main/res/layout/activity_main.xml:12) with [`nav_graph.xml`](mobile/android/app/src/main/res/navigation/nav_graph.xml) and [`bottom_nav_menu.xml`](mobile/android/app/src/main/res/menu/bottom_nav_menu.xml). |
+| **Map Fragment with Category Chips** | ✅ Fully Implemented | [`MapFragment`](mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt): Category filter chips (All, Monument, Grocery, Gas Station, Restaurant, Pharmacy) using Material3 `ChipGroup` with single-selection. Filters markers reactively via ViewModel. **Chips now functional** — see resolution below. |
+| **Radius Filter on Map** | ✅ Fully Implemented | Cycle button (Off → 1 km → 2 km → 5 km → 10 km). Draws a coloured circle overlay on the map centred on the visible region. |
+| **My-Location FAB** | ✅ Fully Implemented | FAB triggers `FusedLocationProviderClient.lastLocation` with `isMyLocationEnabled = true`. Permission request via `ActivityResultContracts.RequestMultiplePermissions()`. |
+| **Marker Rendering (coloured by category)** | ✅ Fully Implemented | Markers coloured by `AppLocationCategory` (Red=Monument, Green=Grocery, Orange=Gas Station, Cyan=Restaurant, Blue=Pharmacy). Visited markers shown in Violet. Marker click opens `LocationDetailsBottomSheet`. |
+| **Add Location Screen** | ✅ Fully Implemented | [`AddLocationFragment`](mobile/android/app/src/main/java/com/navisense/ui/add/AddLocationFragment.kt): Map picker with tap-to-select coordinates, title/description inputs, category dropdown, photo attachment (gallery or camera), save via ViewModel. |
+| **Location Details Bottom Sheet** | ✅ Fully Implemented | [`LocationDetailsBottomSheet`](mobile/android/app/src/main/java/com/navisense/ui/details/LocationDetailsBottomSheet.kt): Shows image, title, category, coordinates, description. "Mark as Visited" toggle and "Delete Location" button. |
+| **Route Builder** | ✅ Fully Implemented | [`RouteBuilderFragment`](mobile/android/app/src/main/java/com/navisense/ui/route/RouteBuilderFragment.kt): Split map + waypoint list. Select locations as waypoints, polyline drawn on map, "Start Navigation" opens Google Maps external nav. |
+| **Analytics Screen** | ✅ Fully Implemented | [`AnalyticsFragment`](mobile/android/app/src/main/java/com/navisense/ui/analytics/AnalyticsFragment.kt): Custom Canvas-drawn [`PieChartView`](mobile/android/app/src/main/java/com/navisense/ui/analytics/PieChartView.kt) (category distribution) and [`BarChartView`](mobile/android/app/src/main/java/com/navisense/ui/analytics/BarChartView.kt) (visited vs not visited). Total location count card. |
+| **Visual Search (Mock)** | ✅ Fully Implemented | [`VisualSearchFragment`](mobile/android/app/src/main/java/com/navisense/ui/search/VisualSearchFragment.kt): Upload/take photo → 2-second loading spinner → navigates to Map → drops yellow mock-match marker. **No actual ML inference on device.** |
+| **MainViewModel (Refactored)** | ✅ Fully Implemented | [`MainViewModel`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt): Shared AndroidViewModel with `LocationRepository` pattern, `filteredLocations` via `combine()`, `analyticsData`, `routeWaypoints`, `mockMatchLocation`. CRUD, route toggle, mock match. |
+| **LocationRepository Pattern** | ✅ Fully Implemented | [`LocationRepository`](mobile/android/app/src/main/java/com/navisense/data/LocationRepository.kt) interface + [`MockLocationRepositoryImpl`](mobile/android/app/src/main/java/com/navisense/data/MockLocationRepositoryImpl.kt) with 10 Kyiv landmarks as seed data. Designed for future Room swap. |
+| **AppLocation Model** | ✅ Fully Implemented | [`AppLocation`](mobile/android/app/src/main/java/com/navisense/model/AppLocation.kt): `@Parcelize` data class with `id`, `title`, `description`, `latitude`, `longitude`, `category`, `imageUri`, `isVisited`. |
+| **AppLocationCategory Enum** | ✅ Fully Implemented | [`AppLocationCategory`](mobile/android/app/src/main/java/com/navisense/model/AppLocationCategory.kt): `MONUMENT`, `GROCERY`, `GAS_STATION`, `RESTAURANT`, `PHARMACY`. Companion `names` and `fromKey()` parser. |
+| **Backend — Full ML Pipeline** | ✅ Fully Implemented | [`feature_extractor.py`](backend/app/feature_extractor.py): DINOv2-base model loading, 768-dim feature extraction, L2 normalization. [`vector_db.py`](backend/app/vector_db.py): FAISS IndexFlatL2, add/search/save/load, demo index with 1000 random Kyiv landmarks. |
+| **Backend — FastAPI Server** | ✅ Fully Implemented | [`main.py`](backend/app/main.py): 4 endpoints (`/`, `/health`, `/position`, `/calibrate`), file validation (JPEG only, max 5 MB), weighted position averaging, mock fallback mode, error handling. |
+| **Backend — Docker Support** | ✅ Fully Implemented | [`Dockerfile`](backend/Dockerfile): Python 3.10-slim, system deps for torch/faiss, pip installs requirements, exposes port 8000. |
+| **Backend — Mock Fallback** | ✅ Fully Implemented | When torch/transformers/faiss are unavailable, `main.py` auto-creates `MockExtractor` (random 768-dim vectors) and `MockVectorDB` (1000 random Kyiv landmarks). |
+
+### 7.3 Known Issues & Gaps
+
+| Issue | Impact | Status / Notes |
+|---|---|---|
+| **CameraX not wired into any fragment** | ❌ The visual positioning pipeline cannot start. | [`ScannerCamera`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt) is fully built but never instantiated. Needs integration into a camera capture flow (likely via `VisualSearchFragment` or a dedicated positioning screen). **Priority for Sprint 3.** |
+| **ML Backend not deployed / reachable** | ❌ `LocalizationApiClient` will fail to connect. | Backend code exists and is runnable (Docker or `uvicorn`), but no cloud host is configured. `BuildConfig.BACKEND_URL` defaults to `http://10.0.2.2:8000/` (emulator localhost). |
+| **Room database not implemented** | ❌ All location data is in-memory; lost on app restart. | `build.gradle.kts` has no Room dependency. `MockLocationRepositoryImpl` serves as placeholder. The `DeliveryHistory.kt`, `DeliveryHistoryDao.kt`, `AppDatabase.kt`, and `NaviSenseApplication.kt` files referenced in some documentation **do not exist on disk**. |
+| **User geolocation blue dot — intermittent** | ⚠️ The My-Location blue dot may not appear on first launch. | [`MapFragment.enableMyLocation()`](mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt:229) uses `FusedLocationProviderClient.lastLocation` which returns `null` if no prior location is cached. Workaround planned: use `getCurrentLocation()` with `PRIORITY_HIGH_ACCURACY`. |
+| **Filter Chips — resolved from Sprint 1** | ✅ Fixed | The old `MainActivity`-based filter chips were non-functional. The new [`MapFragment`](mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt) uses `ChipGroup` with `isSingleSelection=true` and the refactored [`MainViewModel`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt) correctly combines `allLocations` + `selectedCategory` via `combine()`. |
+| **Category filter treats MONUMENT as "All"** | ⚠️ Minor UX bug | In [`MainViewModel.filteredLocations`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt:47), `category == null || category == AppLocationCategory.MONUMENT.key` both show all locations. This means clicking "Monument" chip shows everything. Intentional for MVP? Needs clarification. |
+| **Analytics only recomputes on allLocations changes** | ⚠️ Minor | [`analyticsData`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt:75) combines `allLocations` with a dummy `MutableStateFlow(Unit)`. The Flow works but the `combine` with `Unit` is unconventional. |
+| **16 KB page‑size alignment (Android 15)** | ✅ Fixed (verified) | CameraX 1.4.1 + `packaging { jniLibs { useLegacyPackaging = true } }` added in `build.gradle.kts`. |
 
 ### 7.4 Files Summary
+
+#### Mobile (Android)
 
 | File | Purpose |
 |---|---|
@@ -254,30 +327,63 @@ Sprint 1 delivered a functional Android UI shell with Google Maps integration, r
 | [`mobile/android/build.gradle.kts`](mobile/android/build.gradle.kts) | Project‑level: AGP 8.2.2, Kotlin 1.9.22 |
 | [`mobile/android/gradle.properties`](mobile/android/gradle.properties) | AndroidX, parallel builds, JVM args |
 | [`mobile/android/gradle/wrapper/gradle-wrapper.properties`](mobile/android/gradle/wrapper/gradle-wrapper.properties) | Gradle 8.5 distribution |
-| [`mobile/android/app/build.gradle.kts`](mobile/android/app/build.gradle.kts) | App‑level: CameraX 1.4.1, Maps SDK 18.2.0, Retrofit 2.9, OkHttp 4.12, packaging block for 16 KB alignment |
-| [`mobile/android/app/src/main/AndroidManifest.xml`](mobile/android/app/src/main/AndroidManifest.xml) | Permissions (INTERNET, CAMERA, FINE/COARSE LOCATION), Maps API key meta‑data, single‑activity launcher |
-| [`mobile/android/app/src/main/java/com/navisense/MainActivity.kt`](mobile/android/app/src/main/java/com/navisense/MainActivity.kt) | Single Activity: map init, permission launcher (Camera + Location), search bar, filter chips, marker rendering, `FusedLocationProviderClient` |
-| [`mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt) | ViewModel: `_markers` StateFlow, `_selectedTag` StateFlow, `filteredMarkers` derived flow via `combine()`, mock marker seeding |
-| [`mobile/android/app/src/main/java/com/navisense/model/MarkerItem.kt`](mobile/android/app/src/main/java/com/navisense/model/MarkerItem.kt) | `@Parcelize` data class: `id`, `title`, `snippet`, `latitude`, `longitude`, `tag`. Companion with `TAGS` list and `TAG_ALL = "All"`. |
-| [`mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt) | CameraX wrapper: `ResolutionSelector`, `ImageCapture` with `MINIMIZE_LATENCY`, Laplacian variance blur detection, `captureSharpImage()` callback |
-| [`mobile/android/app/src/main/java/com/navisense/core/FileManagerService.kt`](mobile/android/app/src/main/java/com/navisense/core/FileManagerService.kt) | TempScans folder management, 50 MB free‑space check, UUID file naming, error logging to `error_logs.txt` |
-| [`mobile/android/app/src/main/java/com/navisense/core/LocalizationApiClient.kt`](mobile/android/app/src/main/java/com/navisense/core/LocalizationApiClient.kt) | Retrofit singleton: `buildOkHttpClient()`, `buildRetrofit()`, `localizeImage(file)` suspend function |
+| [`mobile/android/app/build.gradle.kts`](mobile/android/app/build.gradle.kts) | App‑level: CameraX 1.4.1, Maps SDK 18.2.0, Retrofit 2.9, OkHttp 4.12, Navigation 2.7.7, Coil 2.5.0, Maps Utils KTx 5.0.0, Location 21.1.0, packaging block for 16 KB alignment |
+| [`mobile/android/app/src/main/AndroidManifest.xml`](mobile/android/app/src/main/AndroidManifest.xml) | Permissions (INTERNET, CAMERA, FINE/COARSE LOCATION, ACCESS_NETWORK_STATE), Maps API key meta‑data, single‑activity launcher |
+| [`mobile/android/app/src/main/java/com/navisense/MainActivity.kt`](mobile/android/app/src/main/java/com/navisense/MainActivity.kt) | Single Activity hosting `NavHostFragment` + `BottomNavigationView` |
+| [`mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt) | Shared AndroidViewModel: `allLocations`, `selectedCategory`, `filteredLocations`, `selectedRadiusKm`, `routeWaypoints`, `mockMatchLocation`, `analyticsData`. CRUD, route toggle, mock match. |
+| [`mobile/android/app/src/main/java/com/navisense/model/AppLocation.kt`](mobile/android/app/src/main/java/com/navisense/model/AppLocation.kt) | `@Parcelize` data class: `id`, `title`, `description`, `latitude`, `longitude`, `category`, `imageUri`, `isVisited` |
+| [`mobile/android/app/src/main/java/com/navisense/model/AppLocationCategory.kt`](mobile/android/app/src/main/java/com/navisense/model/AppLocationCategory.kt) | Enum: `MONUMENT`, `GROCERY`, `GAS_STATION`, `RESTAURANT`, `PHARMACY` |
+| [`mobile/android/app/src/main/java/com/navisense/model/MarkerItem.kt`](mobile/android/app/src/main/java/com/navisense/model/MarkerItem.kt) | `@Parcelize` data class: legacy model for Sprint 1 markers (transport-mode tags: Walking, Bicycle, Car). Used only in old `MainActivity` code — **may be dead code now** |
+| [`mobile/android/app/src/main/java/com/navisense/data/LocationRepository.kt`](mobile/android/app/src/main/java/com/navisense/data/LocationRepository.kt) | Repository interface: `getAllLocations()`, `getLocationById()`, `insertLocation()`, `updateLocation()`, `deleteLocation()`, `toggleVisited()` |
+| [`mobile/android/app/src/main/java/com/navisense/data/MockLocationRepositoryImpl.kt`](mobile/android/app/src/main/java/com/navisense/data/MockLocationRepositoryImpl.kt) | In-memory mock with 10 Kyiv landmarks as seed data |
+| [`mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt`](mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt) | Map tab: Google Maps, category chips, radius filter, My-Location FAB, marker rendering by category colour, LocationDetailsBottomSheet on marker click, mock match marker drop |
+| [`mobile/android/app/src/main/java/com/navisense/ui/add/AddLocationFragment.kt`](mobile/android/app/src/main/java/com/navisense/ui/add/AddLocationFragment.kt) | Add Location tab: map picker, title/description inputs, category dropdown, photo attachment, save |
+| [`mobile/android/app/src/main/java/com/navisense/ui/analytics/AnalyticsFragment.kt`](mobile/android/app/src/main/java/com/navisense/ui/analytics/AnalyticsFragment.kt) | Analytics tab: pie chart + bar chart + total count |
+| [`mobile/android/app/src/main/java/com/navisense/ui/analytics/PieChartView.kt`](mobile/android/app/src/main/java/com/navisense/ui/analytics/PieChartView.kt) | Custom Canvas-drawn pie chart with legend |
+| [`mobile/android/app/src/main/java/com/navisense/ui/analytics/BarChartView.kt`](mobile/android/app/src/main/java/com/navisense/ui/analytics/BarChartView.kt) | Custom Canvas-drawn bar chart (Visited / Not Visited) |
+| [`mobile/android/app/src/main/java/com/navisense/ui/route/RouteBuilderFragment.kt`](mobile/android/app/src/main/java/com/navisense/ui/route/RouteBuilderFragment.kt) | Route Builder tab: map + waypoint list, polyline, Google Maps external navigation |
+| [`mobile/android/app/src/main/java/com/navisense/ui/search/VisualSearchFragment.kt`](mobile/android/app/src/main/java/com/navisense/ui/search/VisualSearchFragment.kt) | Visual Search tab: gallery/camera picker → 2-second mock → map marker drop |
+| [`mobile/android/app/src/main/java/com/navisense/ui/details/LocationDetailsBottomSheet.kt`](mobile/android/app/src/main/java/com/navisense/ui/details/LocationDetailsBottomSheet.kt) | Bottom sheet: image, title, category, coordinates, description, toggle visited, delete |
+| [`mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt) | CameraX wrapper: ResolutionSelector, ImageCapture with MINIMIZE_LATENCY, Laplacian variance blur detection, `captureSharpImage()` callback |
+| [`mobile/android/app/src/main/java/com/navisense/core/FileManagerService.kt`](mobile/android/app/src/main/java/com/navisense/core/FileManagerService.kt) | TempScans folder management, 50 MB free‑space check, UUID file naming, error logging |
+| [`mobile/android/app/src/main/java/com/navisense/core/LocalizationApiClient.kt`](mobile/android/app/src/main/java/com/navisense/core/LocalizationApiClient.kt) | Retrofit singleton: OkHttp client, retry logic (3 attempts, exponential backoff), `localizeImage()` suspend function |
 | [`mobile/android/app/src/main/java/com/navisense/core/NaviSenseApi.kt`](mobile/android/app/src/main/java/com/navisense/core/NaviSenseApi.kt) | Retrofit interface: `uploadImage()` multipart, `PositionResponse`, `Landmark` data classes |
-| [`mobile/android/app/src/main/res/layout/activity_main.xml`](mobile/android/app/src/main/res/layout/activity_main.xml) | CoordinatorLayout: full‑screen `SupportMapFragment`, search bar overlay (top), filter chips overlay (bottom) |
+| [`mobile/android/app/src/main/res/layout/activity_main.xml`](mobile/android/app/src/main/res/layout/activity_main.xml) | NavHostFragment + BottomNavigationView |
+| [`mobile/android/app/src/main/res/layout/fragment_map.xml`](mobile/android/app/src/main/res/layout/fragment_map.xml) | Map: SupportMapFragment + filter card (ChipGroup + radius button) + FAB |
+| [`mobile/android/app/src/main/res/layout/fragment_add_location.xml`](mobile/android/app/src/main/res/layout/fragment_add_location.xml) | Add Location form: map picker, text inputs, dropdown, photo button, save |
+| [`mobile/android/app/src/main/res/layout/fragment_analytics.xml`](mobile/android/app/src/main/res/layout/fragment_analytics.xml) | Analytics: PieChartView, BarChartView, total count card |
+| [`mobile/android/app/src/main/res/layout/fragment_route_builder.xml`](mobile/android/app/src/main/res/layout/fragment_route_builder.xml) | Route Builder: map (top) + RecyclerView waypoint list + action buttons (bottom) |
+| [`mobile/android/app/src/main/res/layout/fragment_visual_search.xml`](mobile/android/app/src/main/res/layout/fragment_visual_search.xml) | Visual Search: upload/take photo buttons + loading spinner overlay |
+| [`mobile/android/app/src/main/res/layout/bottom_sheet_location_details.xml`](mobile/android/app/src/main/res/layout/bottom_sheet_location_details.xml) | Location details: image, title, category, coordinates, description, toggle visited, delete |
+| [`mobile/android/app/src/main/res/navigation/nav_graph.xml`](mobile/android/app/src/main/res/navigation/nav_graph.xml) | Navigation graph: 5 fragment destinations (map, add, route, analytics, visual search) |
+| [`mobile/android/app/src/main/res/menu/bottom_nav_menu.xml`](mobile/android/app/src/main/res/menu/bottom_nav_menu.xml) | Bottom nav: Map, Routes, Add, Analytics, Visual Search |
 | [`mobile/android/app/src/main/res/values/strings.xml`](mobile/android/app/src/main/res/values/strings.xml) | English strings (EN) |
 | [`mobile/android/app/src/main/res/values-uk/strings.xml`](mobile/android/app/src/main/res/values-uk/strings.xml) | Ukrainian strings (UK) |
-| [`mobile/android/app/src/main/res/values/colors.xml`](mobile/android/app/src/main/res/values/colors.xml) | Brand colours, marker tag colours |
+| [`mobile/android/app/src/main/res/values/colors.xml`](mobile/android/app/src/main/res/values/colors.xml) | Brand colours, marker colours, radius fill colour |
 | [`mobile/android/app/src/main/res/values/themes.xml`](mobile/android/app/src/main/res/values/themes.xml) | Material3 Light NoActionBar theme |
 | [`mobile/android/app/proguard-rules.pro`](mobile/android/app/proguard-rules.pro) | Keep rules for Retrofit, Gson, Maps |
-| [`backend/`](backend/) | Python FastAPI backend, DINOv2 feature extractor, FAISS vector DB *(not deployed)* |
+
+#### Backend (Python)
+
+| File | Purpose |
+|---|---|
+| [`backend/app/__init__.py`](backend/app/__init__.py) | Package marker (empty) |
+| [`backend/app/main.py`](backend/app/main.py) | FastAPI application: 4 endpoints, file validation, component lazy-loading, mock fallback |
+| [`backend/app/feature_extractor.py`](backend/app/feature_extractor.py) | DINOv2FeatureExtractor: model loading, 768-dim feature extraction, L2 normalization |
+| [`backend/app/vector_db.py`](backend/app/vector_db.py) | FAISS VectorDatabase: index creation (flat_l2 / ivf_flat), add/search/save/load, demo index generation |
+| [`backend/requirements.txt`](backend/requirements.txt) | Python dependencies: fastapi, uvicorn, torch, transformers, faiss-cpu, pillow, numpy, etc. |
+| [`backend/Dockerfile`](backend/Dockerfile) | Docker image: python:3.10-slim, system deps for torch/faiss, pip installs, exposes 8000 |
+| [`backend/README.md`](backend/README.md) | Backend documentation: architecture, installation, API, Docker, troubleshooting |
 
 ### 7.5 Build & Run Instructions
 
 ```bash
+# ── Android App ──────────────────────────────────────────────────────
+
 # 1. Configure your Google Maps API key
 #    - Open mobile/android/app/src/main/AndroidManifest.xml
 #    - Replace the value of com.google.android.geo.API_KEY with your key
-#    - Ensure "Maps SDK for Android" is enabled in Google Cloud Console
+#    - Ensure "Maps SDK for Android" is ENABLED in Google Cloud Console
 
 # 2. Clean build (required after cache changes, e.g. CameraX upgrade)
 cd mobile/android
@@ -285,14 +391,60 @@ cd mobile/android
 
 # 3. Install on device / emulator (API 26+)
 ./gradlew installDebug
+
+# ── Backend (Python) ─────────────────────────────────────────────────
+
+# 1. Create and activate virtual environment
+cd backend
+python -m venv venv
+# On Windows: venv\Scripts\activate
+# On macOS/Linux: source venv/bin/activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Run in development mode (with mock fallback if torch/faiss missing)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 4. API docs available at http://localhost:8000/docs
+
+# ── Backend (Docker) ─────────────────────────────────────────────────
+
+cd backend
+docker build -t navisense-backend .
+docker run -p 8000:8000 navisense-backend
 ```
 
-### 7.6 Sprint 2 Priority Items
+### 7.6 Sprint 3 Priority Items
 
-1. **Fix filter chips** — Debug `MainViewModel.filteredMarkers` to ensure `combine()` reacts to `_selectedTag` changes correctly.
-2. **Wire CameraX into UI** — Instantiate `ScannerCamera` in `MainActivity` on the `CAMERA`-granted permission branch.
-3. **Deploy ML backend** — Deploy FastAPI service (Docker) to a cloud host, update `BACKEND_URL`.
-4. **Fix user geolocation blue dot** — Debug `FusedLocationProviderClient.lastLocation` flow; consider using `getCurrentLocation()` with `Priority.PRIORITY_HIGH_ACCURACY` as fallback.
+1. **Wire CameraX into Visual Search (or dedicated capture flow)** — Instantiate `ScannerCamera` and integrate with `FileManagerService` + `LocalizationApiClient`. Complete the end‑to‑end pipeline: capture → blur check → save → upload → receive position → delete → update UI.
+
+2. **Deploy ML backend** — Deploy FastAPI service (Docker) to a cloud host (AWS/GCP), update `BACKEND_URL` via `BuildConfig.BACKEND_URL` or a runtime configuration.
+
+3. **Implement Room database** — Add Room dependency to `build.gradle.kts`, create `AppDatabase`, `DeliveryHistory` entity, `DeliveryHistoryDao`, replace `MockLocationRepositoryImpl` with a Room-backed implementation.
+
+4. **Fix My-Location blue dot reliability** — Replace `FusedLocationProviderClient.lastLocation` with `getCurrentLocation(PRIORITY_HIGH_ACCURACY, ...)` for more reliable first-launch positioning.
+
+5. **Fix MONUMENT filter treating as "All"** — Review [`MainViewModel.filteredLocations`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt:47) logic: `category == AppLocationCategory.MONUMENT.key` currently passes all locations through. Either remove this exception or decide it's intentional.
+
+6. **Remove dead code** — The original `MarkerItem` model and any references to transport‑mode tag chips (Walking, Bicycle, Car) from Sprint 1 may no longer be used. Audit and clean up.
+
+7. **Unit & integration tests** — Add `pytest` tests for backend endpoints and `JUnit`/`Espresso` tests for Android.
+
+---
+
+## 8. Files Not Currently on Disk
+
+The following files are referenced in some documentation or IDE tabs but **do not exist** on disk:
+
+| Referenced File | Notes |
+|---|---|
+| `mobile/android/app/src/main/java/com/navisense/NaviSenseApplication.kt` | Room Application class — not yet created. |
+| `mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistory.kt` | Room Entity — not yet created. |
+| `mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistoryDao.kt` | Room DAO — not yet created. |
+| `mobile/android/app/src/main/java/com/navisense/data/local/AppDatabase.kt` | Room Database — not yet created. |
+
+These will be implemented when Room is added (Sprint 3).
 
 ---
 
