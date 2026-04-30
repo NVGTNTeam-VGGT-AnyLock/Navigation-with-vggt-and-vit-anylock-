@@ -20,15 +20,20 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.navisense.R
 import com.navisense.databinding.FragmentAddLocationBinding
+import com.navisense.model.AppLocation
 import com.navisense.model.AppLocationCategory
 import com.navisense.ui.MainViewModel
 
 /**
- * Screen for adding a new [com.navisense.model.AppLocation].
+ * Screen for adding or editing a [AppLocation].
  *
- * User picks coordinates by tapping on a map preview, fills in title,
- * description, category (dropdown), and optionally attaches a photo
- * (Gallery or Camera intent). Saves via [MainViewModel].
+ * Supports two modes:
+ * - **Add mode** (default): User picks coordinates by tapping on a map preview,
+ *   fills in fields, and saves a new location.
+ * - **Edit mode**: Activated via [newInstance] with existing data. Pre-fills
+ *   all fields. Save updates the existing location.
+ *
+ * Includes "No Category" option in the category dropdown.
  */
 class AddLocationFragment : Fragment() {
 
@@ -39,6 +44,12 @@ class AddLocationFragment : Fragment() {
     private lateinit var map: GoogleMap
     private var selectedLatLng: LatLng? = null
     private var photoUri: Uri? = null
+
+    // Edit mode fields
+    private var editLocationId: Int? = null
+    private var editOriginalCategory: String? = null
+    private var editIsVisited: Boolean = false
+    private var editIsFavorite: Boolean = false
 
     // Gallery picker
     private val galleryLauncher = registerForActivityResult(
@@ -63,6 +74,33 @@ class AddLocationFragment : Fragment() {
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Read edit-mode arguments
+        arguments?.let { args ->
+            editLocationId = args.getInt(ARG_LOCATION_ID, -1).let { if (it == -1) null else it }
+            editIsVisited = args.getBoolean(ARG_IS_VISITED, false)
+            editIsFavorite = args.getBoolean(ARG_IS_FAVORITE, false)
+            val title = args.getString(ARG_TITLE)
+            val description = args.getString(ARG_DESCRIPTION)
+            val lat = args.getDouble(ARG_LATITUDE, Double.NaN)
+            val lng = args.getDouble(ARG_LONGITUDE, Double.NaN)
+            val category = args.getString(ARG_CATEGORY)
+            val imageUri = args.getString(ARG_IMAGE_URI)
+
+            if (editLocationId != null && !lat.isNaN() && !lng.isNaN()) {
+                selectedLatLng = LatLng(lat, lng)
+                editOriginalCategory = category
+                // Store in a bundle for later use after view creation
+                savedInstanceState?.putString("edit_title", title)
+                savedInstanceState?.putString("edit_description", description)
+                savedInstanceState?.putString("edit_category", category)
+                savedInstanceState?.putString("edit_image_uri", imageUri)
+            }
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
@@ -77,6 +115,20 @@ class AddLocationFragment : Fragment() {
         initCategoryDropdown()
         initPhotoButton()
         initSaveButton()
+
+        // Pre-fill fields in edit mode
+        if (editLocationId != null) {
+            binding.btnSave.text = getString(R.string.update)
+            binding.tvAddTitle.text = getString(R.string.edit_location_title)
+
+            arguments?.let { args ->
+                args.getString(ARG_TITLE)?.let { binding.etTitle.setText(it) }
+                args.getString(ARG_DESCRIPTION)?.let { binding.etDescription.setText(it) }
+                args.getString(ARG_CATEGORY)?.let {
+                    binding.actvCategory.setText(it, false)
+                }
+            }
+        }
     }
 
     // ── Map Picker ─────────────────────────────────────────────────
@@ -87,25 +139,40 @@ class AddLocationFragment : Fragment() {
 
         mapFragment.getMapAsync { googleMap ->
             map = googleMap
-            map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(50.4501, 30.5234), 13f))
+
+            val defaultLatLng = selectedLatLng ?: LatLng(50.4501, 30.5234)
+            map.moveCamera(CameraUpdateFactory.newLatLngZoom(defaultLatLng, 13f))
             map.uiSettings.isZoomControlsEnabled = true
             map.uiSettings.isMapToolbarEnabled = false
 
-            // Default selection: Kyiv centre
-            selectedLatLng = LatLng(50.4501, 30.5234)
-            binding.tvSelectedCoords.text = "50.4501, 30.5234"
-
-            // Tap to pick coordinates
-            map.setOnMapClickListener { latLng ->
-                map.clear()
-                selectedLatLng = latLng
-                binding.tvSelectedCoords.text =
-                    getString(com.navisense.R.string.coords_format, latLng.latitude, latLng.longitude)
+            // If in edit mode, show existing marker
+            if (selectedLatLng != null) {
                 map.addMarker(
                     MarkerOptions()
-                        .position(latLng)
-                        .title(getString(com.navisense.R.string.selected_position))
+                        .position(selectedLatLng!!)
+                        .title(getString(R.string.selected_position))
                 )
+                binding.tvSelectedCoords.text = getString(
+                    R.string.coords_format,
+                    selectedLatLng!!.latitude,
+                    selectedLatLng!!.longitude
+                )
+            }
+
+            // In edit mode, do NOT allow changing coordinates
+            if (editLocationId == null) {
+                // Tap to pick coordinates
+                map.setOnMapClickListener { latLng ->
+                    map.clear()
+                    selectedLatLng = latLng
+                    binding.tvSelectedCoords.text =
+                        getString(R.string.coords_format, latLng.latitude, latLng.longitude)
+                    map.addMarker(
+                        MarkerOptions()
+                            .position(latLng)
+                            .title(getString(R.string.selected_position))
+                    )
+                }
             }
         }
     }
@@ -113,33 +180,26 @@ class AddLocationFragment : Fragment() {
     // ── Category Dropdown ──────────────────────────────────────────
 
     private fun initCategoryDropdown() {
+        // Include "No Category" option
         val categories = AppLocationCategory.names
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, categories)
         binding.actvCategory.setAdapter(adapter)
-        binding.actvCategory.setText(AppLocationCategory.MONUMENT.key, false)
+        binding.actvCategory.setText(editOriginalCategory ?: AppLocationCategory.MONUMENT.key, false)
     }
 
     // ── Photo Attachment ───────────────────────────────────────────
 
     private fun initPhotoButton() {
         binding.btnAttachPhoto.setOnClickListener {
-            // Show a simple dialog-style choice: Gallery or Camera
-          //  val options = arrayOf(
-          //      getString(com.navisense.R.string.gallery),
-           //     getString(com.navisense.R.string.camera)
-          //  )
-            // Simple approach: cycle between gallery and camera
             showPhotoPicker()
         }
     }
 
     private fun showPhotoPicker() {
-        // For simplicity: directly open gallery
-        // In production, show a bottom sheet picker
         galleryLauncher.launch("image/*")
     }
 
-    // ── Save ───────────────────────────────────────────────────────
+    // ── Save / Update ──────────────────────────────────────────────
 
     private fun initSaveButton() {
         binding.btnSave.setOnClickListener {
@@ -150,37 +210,98 @@ class AddLocationFragment : Fragment() {
 
             // Validation
             if (title.isNullOrEmpty()) {
-                binding.etTitle.error = getString(com.navisense.R.string.required_field)
+                binding.etTitle.error = getString(R.string.required_field)
                 return@setOnClickListener
             }
             if (coords == null) {
-                Toast.makeText(requireContext(), com.navisense.R.string.select_coords, Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), R.string.select_coords, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
-            viewModel.addLocation(
-                title = title,
-                description = description ?: "",
-                latitude = coords.latitude,
-                longitude = coords.longitude,
-                category = category,
-                imageUri = photoUri?.toString() ?: ""
-            )
+            val locationId = editLocationId
+            if (locationId != null) {
+                // Update existing location — preserve isVisited/isFavorite from original
+                viewModel.updateLocation(
+                    AppLocation(
+                        id = locationId,
+                        title = title,
+                        description = description ?: "",
+                        latitude = coords.latitude,
+                        longitude = coords.longitude,
+                        category = category,
+                        imageUri = photoUri?.toString() ?: "",
+                        isVisited = editIsVisited,
+                        isFavorite = editIsFavorite
+                    )
+                )
+                Toast.makeText(requireContext(), R.string.location_updated, Toast.LENGTH_SHORT).show()
+            } else {
+                // Insert new location
+                viewModel.addLocation(
+                    title = title,
+                    description = description ?: "",
+                    latitude = coords.latitude,
+                    longitude = coords.longitude,
+                    category = category,
+                    imageUri = photoUri?.toString() ?: ""
+                )
+                Toast.makeText(requireContext(), R.string.location_saved, Toast.LENGTH_SHORT).show()
+            }
 
-            Toast.makeText(requireContext(), com.navisense.R.string.location_saved, Toast.LENGTH_SHORT).show()
-
-            // Clear form
-            binding.etTitle.text?.clear()
-            binding.etDescription.text?.clear()
-            selectedLatLng = null
-            photoUri = null
-            binding.ivPhotoPreview.visibility = View.GONE
-            map.clear()
+            // Navigate back
+            parentFragmentManager.popBackStack()
         }
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+    }
+
+    companion object {
+        private const val ARG_LOCATION_ID = "location_id"
+        private const val ARG_TITLE = "title"
+        private const val ARG_DESCRIPTION = "description"
+        private const val ARG_LATITUDE = "latitude"
+        private const val ARG_LONGITUDE = "longitude"
+        private const val ARG_CATEGORY = "category"
+        private const val ARG_IMAGE_URI = "image_uri"
+        private const val ARG_IS_VISITED = "is_visited"
+        private const val ARG_IS_FAVORITE = "is_favorite"
+
+        /**
+         * Creates a new instance for ADD mode.
+         */
+        fun newInstance(): AddLocationFragment {
+            return AddLocationFragment()
+        }
+
+        /**
+         * Creates a new instance for EDIT mode with pre-filled data.
+         */
+        fun newInstance(
+            locationId: Int,
+            title: String,
+            description: String,
+            latitude: Double,
+            longitude: Double,
+            category: String,
+            imageUri: String,
+            isVisited: Boolean = false,
+            isFavorite: Boolean = false
+        ): AddLocationFragment {
+            val args = Bundle().apply {
+                putInt(ARG_LOCATION_ID, locationId)
+                putString(ARG_TITLE, title)
+                putString(ARG_DESCRIPTION, description)
+                putDouble(ARG_LATITUDE, latitude)
+                putDouble(ARG_LONGITUDE, longitude)
+                putString(ARG_CATEGORY, category)
+                putString(ARG_IMAGE_URI, imageUri)
+                putBoolean(ARG_IS_VISITED, isVisited)
+                putBoolean(ARG_IS_FAVORITE, isFavorite)
+            }
+            return AddLocationFragment().apply { arguments = args }
+        }
     }
 }
