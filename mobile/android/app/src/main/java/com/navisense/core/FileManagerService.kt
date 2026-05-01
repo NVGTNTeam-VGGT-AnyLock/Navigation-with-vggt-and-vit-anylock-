@@ -101,6 +101,33 @@ class FileManagerService(private val context: Context) {
     }
 
     /**
+     * Clears all `.jpg` files from the TempScans directory.
+     * This is called after successful processing to enforce the
+     * "no image remains on device longer than 5 minutes" policy.
+     *
+     * @return the number of files deleted
+     */
+    fun clearTempScansFolder(): Int {
+        val tempDir = getTempScansDir()
+        if (!tempDir.exists() || !tempDir.isDirectory) return 0
+
+        var deletedCount = 0
+        val files = tempDir.listFiles()
+        if (files != null) {
+            for (file in files) {
+                if (file.isFile && file.name.endsWith(FILE_SUFFIX)) {
+                    if (file.delete()) {
+                        deletedCount++
+                    } else {
+                        logError("Failed to delete temp file: ${file.name}")
+                    }
+                }
+            }
+        }
+        return deletedCount
+    }
+
+    /**
      * Appends an error message with a timestamp to the error log file.
      * @param errorMessage the error description
      * @throws FileManagerException if writing fails

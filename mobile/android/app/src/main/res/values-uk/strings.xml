@@ -90,9 +90,17 @@
     <string name="visual_search_description">Завантажте або зробіть фото, щоб знайти відповідні локації за допомогою AI візуального пошуку.</string>
     <string name="upload_photo">Завантажити фото</string>
     <string name="take_photo">Зробити фото</string>
+    <string name="capture_photo">Зробити знімок</string>
+    <string name="camera_unavailable">Камера недоступна</string>
     <string name="searching">Пошук…</string>
     <string name="match_found_title">Візуальний збіг</string>
     <string name="match_found_description">Знайдено за допомогою AI пошуку</string>
+    <string name="toast_image_captured">Зображення успішно захоплено</string>
+    <string name="toast_image_blurry">Зображення надто розмите — спробуйте ще раз</string>
+    <string name="toast_camera_error">Помилка камери</string>
+    <string name="toast_storage_insufficient">Недостатньо місця у сховищі</string>
+    <string name="toast_temp_scans_cleared">Тимчасові файли очищено</string>
+    <string name="toast_file_error">Помилка операції з файлом</string>
 
     <!-- Analytics Screen -->
     <string name="analytics_title">Аналітика</string>

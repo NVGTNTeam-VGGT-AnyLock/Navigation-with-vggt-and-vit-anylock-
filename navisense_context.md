@@ -31,7 +31,7 @@ NaviSense is a visual positioning mobile application designed for couriers opera
     - Multipart file upload with JPEG compression quality 85%
     - Logging interceptor (HTTP body logging in debug)
   - **Coil 2.5.0** for image loading
-  - **Room** for local caching *(planned — not yet implemented; `build.gradle.kts` does not include Room dependency)*
+  - **Room 2.6.1** (with KSP) for local SQLite persistence — [`DeliveryHistory`](mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistory.kt) entity, [`DeliveryHistoryDao`](mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistoryDao.kt), [`AppDatabase`](mobile/android/app/src/main/java/com/navisense/data/local/AppDatabase.kt) singleton via [`NaviSenseApplication`](mobile/android/app/src/main/java/com/navisense/NaviSenseApplication.kt)
   - **Material3** for UI components (chips, cards, bottom sheets, bottom navigation)
   - OpenCV‑Android *not used* — custom Kotlin Laplacian variance used for blur detection
 
@@ -310,7 +310,7 @@ The project has evolved through two major phases:
 |---|---|---|
 | **CameraX not wired into any fragment** | ❌ The visual positioning pipeline cannot start. | [`ScannerCamera`](mobile/android/app/src/main/java/com/navisense/core/ScannerCamera.kt) is fully built but never instantiated. Needs integration into a camera capture flow (likely via `VisualSearchFragment` or a dedicated positioning screen). **Priority for Sprint 3.** |
 | **ML Backend not deployed / reachable** | ❌ `LocalizationApiClient` will fail to connect. | Backend code exists and is runnable (Docker or `uvicorn`), but no cloud host is configured. `BuildConfig.BACKEND_URL` defaults to `http://10.0.2.2:8000/` (emulator localhost). |
-| **Room database not implemented** | ❌ All location data is in-memory; lost on app restart. | `build.gradle.kts` has no Room dependency. `MockLocationRepositoryImpl` serves as placeholder. The `DeliveryHistory.kt`, `DeliveryHistoryDao.kt`, `AppDatabase.kt`, and `NaviSenseApplication.kt` files referenced in some documentation **do not exist on disk**. |
+| **Room database implemented** | ✅ All Room components created | [`DeliveryHistory`](mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistory.kt) entity, [`DeliveryHistoryDao`](mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistoryDao.kt) with Flow/suspend, [`AppDatabase`](mobile/android/app/src/main/java/com/navisense/data/local/AppDatabase.kt) singleton, [`NaviSenseApplication`](mobile/android/app/src/main/java/com/navisense/NaviSenseApplication.kt). Dependencies added to `build.gradle.kts` (KSP + Room 2.6.1). See Sprint 3 item 3 for remaining work (Room-backed `LocationRepository`). |
 | **User geolocation blue dot — intermittent** | ⚠️ The My-Location blue dot may not appear on first launch. | [`MapFragment.enableMyLocation()`](mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt:229) uses `FusedLocationProviderClient.lastLocation` which returns `null` if no prior location is cached. Workaround planned: use `getCurrentLocation()` with `PRIORITY_HIGH_ACCURACY`. |
 | **Filter Chips — resolved from Sprint 1** | ✅ Fixed | The old `MainActivity`-based filter chips were non-functional. The new [`MapFragment`](mobile/android/app/src/main/java/com/navisense/ui/map/MapFragment.kt) uses `ChipGroup` with `isSingleSelection=true` and the refactored [`MainViewModel`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt) correctly combines `allLocations` + `selectedCategory` via `combine()`. |
 | **Category filter treats MONUMENT as "All"** | ⚠️ Minor UX bug | In [`MainViewModel.filteredLocations`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt:47), `category == null || category == AppLocationCategory.MONUMENT.key` both show all locations. This means clicking "Monument" chip shows everything. Intentional for MVP? Needs clarification. |
@@ -421,7 +421,7 @@ docker run -p 8000:8000 navisense-backend
 
 2. **Deploy ML backend** — Deploy FastAPI service (Docker) to a cloud host (AWS/GCP), update `BACKEND_URL` via `BuildConfig.BACKEND_URL` or a runtime configuration.
 
-3. **Implement Room database** — Add Room dependency to `build.gradle.kts`, create `AppDatabase`, `DeliveryHistory` entity, `DeliveryHistoryDao`, replace `MockLocationRepositoryImpl` with a Room-backed implementation.
+3. **Implement Room database** — ✅ **Core Room components created.** Dependencies (KSP + Room 2.6.1) added to `build.gradle.kts`. [`DeliveryHistory`](mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistory.kt) entity, [`DeliveryHistoryDao`](mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistoryDao.kt), [`AppDatabase`](mobile/android/app/src/main/java/com/navisense/data/local/AppDatabase.kt), and [`NaviSenseApplication`](mobile/android/app/src/main/java/com/navisense/NaviSenseApplication.kt) are on disk. **Remaining:** create `RoomLocationRepositoryImpl` implementing [`LocationRepository`](mobile/android/app/src/main/java/com/navisense/data/LocationRepository.kt) backed by Room DAO, then swap in [`MainViewModel`](mobile/android/app/src/main/java/com/navisense/ui/MainViewModel.kt:35).
 
 4. **Fix My-Location blue dot reliability** — Replace `FusedLocationProviderClient.lastLocation` with `getCurrentLocation(PRIORITY_HIGH_ACCURACY, ...)` for more reliable first-launch positioning.
 
@@ -435,16 +435,14 @@ docker run -p 8000:8000 navisense-backend
 
 ## 8. Files Not Currently on Disk
 
-The following files are referenced in some documentation or IDE tabs but **do not exist** on disk:
+*(None — all previously missing files have been created in Sprint 3.)*
 
-| Referenced File | Notes |
+| Previously Missing File | Status |
 |---|---|
-| `mobile/android/app/src/main/java/com/navisense/NaviSenseApplication.kt` | Room Application class — not yet created. |
-| `mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistory.kt` | Room Entity — not yet created. |
-| `mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistoryDao.kt` | Room DAO — not yet created. |
-| `mobile/android/app/src/main/java/com/navisense/data/local/AppDatabase.kt` | Room Database — not yet created. |
-
-These will be implemented when Room is added (Sprint 3).
+| `mobile/android/app/src/main/java/com/navisense/NaviSenseApplication.kt` | ✅ Created |
+| `mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistory.kt` | ✅ Created |
+| `mobile/android/app/src/main/java/com/navisense/data/local/DeliveryHistoryDao.kt` | ✅ Created |
+| `mobile/android/app/src/main/java/com/navisense/data/local/AppDatabase.kt` | ✅ Created |
 
 ---
 

@@ -1,9 +1,11 @@
 import java.util.Properties
+import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("kotlin-parcelize")
+    id("com.google.devtools.ksp")
 }
 
 // ── Secure API Key Injection ─────────────────────────────────────────
@@ -37,6 +39,9 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Inject Maps API key into AndroidManifest.xml via placeholder
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
 
         /**
          * Backend URL for the NaviSense positioning API.
@@ -130,6 +135,11 @@ dependencies {
 
     // ── Image Loading (Coil) ───────────────────────────────────────
     implementation("io.coil-kt:coil:2.5.0")
+
+    // ── Room Database (SQLite) ─────────────────────────────────────
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
 
     // ── Testing ────────────────────────────────────────────────────
     testImplementation("junit:junit:4.13.2")

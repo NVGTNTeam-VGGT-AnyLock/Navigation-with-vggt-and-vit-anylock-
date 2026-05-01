@@ -90,9 +90,17 @@
     <string name="visual_search_description">Upload or take a photo to find matching locations using AI visual search.</string>
     <string name="upload_photo">Upload Photo</string>
     <string name="take_photo">Take Photo</string>
+    <string name="capture_photo">Capture Photo</string>
+    <string name="camera_unavailable">Camera unavailable</string>
     <string name="searching">Searching…</string>
     <string name="match_found_title">Visual Match</string>
     <string name="match_found_description">Found via AI visual search</string>
+    <string name="toast_image_captured">Image captured successfully</string>
+    <string name="toast_image_blurry">Image too blurry — please try again</string>
+    <string name="toast_camera_error">Camera error occurred</string>
+    <string name="toast_storage_insufficient">Not enough storage space</string>
+    <string name="toast_temp_scans_cleared">Temporary files cleaned up</string>
+    <string name="toast_file_error">File operation error</string>
 
     <!-- Analytics Screen -->
     <string name="analytics_title">Analytics</string>
