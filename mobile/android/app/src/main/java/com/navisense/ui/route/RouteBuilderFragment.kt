@@ -66,6 +66,7 @@ class RouteBuilderFragment : Fragment() {
         initWaypointsList()
         initButtons()
         observeWaypoints()
+        observePolyline()
     }
 
     // ── Map Initialisation ─────────────────────────────────────────
@@ -125,10 +126,9 @@ class RouteBuilderFragment : Fragment() {
     }
 
     private fun updateMapWaypoints(waypoints: List<AppLocation>) {
-        // Clear old markers and polyline
+        // Clear old markers only (polyline is managed separately)
         waypointMarkers.forEach { it.remove() }
         waypointMarkers.clear()
-        routePolyline?.remove()
 
         if (waypoints.isEmpty()) return
 
@@ -160,28 +160,6 @@ class RouteBuilderFragment : Fragment() {
             if (marker != null) waypointMarkers.add(marker)
         }
 
-        // Draw road-aware Polyline using mock interpolated points
-        val polylinePoints = viewModel.routePolylinePoints.value
-        if (polylinePoints.isNotEmpty()) {
-            val routeLatLngs = polylinePoints.map { LatLng(it.first, it.second) }
-            routePolyline = map.addPolyline(
-                PolylineOptions()
-                    .addAll(routeLatLngs)
-                    .width(6f)
-                    .color(0xFF1565C0.toInt())
-                    .geodesic(false)
-            )
-        } else {
-            // Fallback: straight line if no polyline data
-            routePolyline = map.addPolyline(
-                PolylineOptions()
-                    .addAll(latLngs)
-                    .width(5f)
-                    .color(0xFF1565C0.toInt())
-                    .geodesic(true)
-            )
-        }
-
         // Zoom to fit all waypoints
         if (latLngs.size > 1) {
             val boundsBuilder = LatLngBounds.builder()
@@ -189,6 +167,47 @@ class RouteBuilderFragment : Fragment() {
             map.animateCamera(CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 100))
         } else if (latLngs.size == 1) {
             map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLngs[0], 15f))
+        }
+    }
+
+    // ── Observe Polyline Points (async from Directions API) ─────────
+
+    private fun observePolyline() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Observe both polyline points and current waypoints so we can
+                // fall back to straight lines when the API hasn't returned yet.
+                viewModel.routePolylinePoints.collectLatest { points ->
+                    updatePolyline(points)
+                }
+            }
+        }
+    }
+
+    private fun updatePolyline(points: List<LatLng>) {
+        routePolyline?.remove()
+        routePolyline = null
+
+        if (points.isNotEmpty()) {
+            // Road-aware polyline from Directions API (or fallback straight lines)
+            routePolyline = map.addPolyline(
+                PolylineOptions()
+                    .addAll(points)
+                    .width(6f)
+                    .color(0xFF1565C0.toInt())
+                    .geodesic(false)
+            )
+        } else if (::map.isInitialized && viewModel.routeWaypoints.value.size >= 2) {
+            // Fallback: straight-line segments between waypoints
+            val waypoints = viewModel.routeWaypoints.value
+            val straightLatLngs = waypoints.map { LatLng(it.latitude, it.longitude) }
+            routePolyline = map.addPolyline(
+                PolylineOptions()
+                    .addAll(straightLatLngs)
+                    .width(5f)
+                    .color(0xFF1565C0.toInt())
+                    .geodesic(true)
+            )
         }
     }
 
@@ -201,19 +220,29 @@ class RouteBuilderFragment : Fragment() {
             (binding.rvWaypoints.adapter as? WaypointAdapter)?.notifyDataSetChanged()
         }
 
-        // Optimize Route button: reorders middle waypoints using TSP heuristic
+        // Optimize Route button: calls Google Directions API with optimizeWaypoints(true)
         binding.btnOptimizeRoute.setOnClickListener {
             val waypoints = viewModel.routeWaypoints.value
             if (waypoints.size < 3) {
                 Toast.makeText(requireContext(), R.string.route_optimize_min, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            // Disable button while API call is in flight
+            binding.btnOptimizeRoute.isEnabled = false
             viewModel.optimizeRoute()
-            // Update local selectedIds to match new order
-            selectedIds.clear()
-            selectedIds.addAll(viewModel.routeWaypoints.value.map { it.id })
-            (binding.rvWaypoints.adapter as? WaypointAdapter)?.notifyDataSetChanged()
-            Toast.makeText(requireContext(), R.string.route_optimized, Toast.LENGTH_SHORT).show()
+
+            // Show brief feedback; the polyline/waypoints update asynchronously
+            // when the API response arrives (observed via routePolylinePoints).
+            Toast.makeText(requireContext(), R.string.route_optimizing, Toast.LENGTH_SHORT).show()
+        }
+
+        // Re-enable the Optimize button once the API call finishes
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.isOptimizing.collectLatest { optimizing ->
+                    binding.btnOptimizeRoute.isEnabled = !optimizing
+                }
+            }
         }
 
         binding.btnStartNavigation.setOnClickListener {

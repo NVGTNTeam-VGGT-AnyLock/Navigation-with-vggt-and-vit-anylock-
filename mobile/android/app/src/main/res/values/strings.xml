@@ -82,6 +82,7 @@
     <string name="clear">Clear</string>
     <string name="optimize_route">Optimize</string>
     <string name="route_optimized">Route optimized! Middle waypoints reordered for shortest path.</string>
+    <string name="route_optimizing">Optimizing route via Google Maps…</string>
     <string name="route_optimize_min">Need at least 3 waypoints to optimize.</string>
     <string name="route_empty">Please add at least one waypoint before starting navigation</string>
 
