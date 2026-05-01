@@ -45,6 +45,9 @@ class AddLocationFragment : Fragment() {
     private var selectedLatLng: LatLng? = null
     private var photoUri: Uri? = null
 
+    /** Maps display name (localized) → category key for the dropdown. */
+    private var categoryPairs: List<Pair<String, String>> = emptyList()
+
     // Edit mode fields
     private var editLocationId: Int? = null
     private var editOriginalCategory: String? = null
@@ -124,8 +127,11 @@ class AddLocationFragment : Fragment() {
             arguments?.let { args ->
                 args.getString(ARG_TITLE)?.let { binding.etTitle.setText(it) }
                 args.getString(ARG_DESCRIPTION)?.let { binding.etDescription.setText(it) }
-                args.getString(ARG_CATEGORY)?.let {
-                    binding.actvCategory.setText(it, false)
+                args.getString(ARG_CATEGORY)?.let { catKey ->
+                    // Set the localized display name in the dropdown
+                    val displayName = categoryPairs.firstOrNull { it.second == catKey }?.first
+                        ?: catKey
+                    binding.actvCategory.setText(displayName, false)
                 }
             }
         }
@@ -180,11 +186,29 @@ class AddLocationFragment : Fragment() {
     // ── Category Dropdown ──────────────────────────────────────────
 
     private fun initCategoryDropdown() {
-        // Include "No Category" option
-        val categories = AppLocationCategory.names
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, categories)
+        // Build a list of (localized display name → category key) pairs
+        categoryPairs = AppLocationCategory.entries.map { entry ->
+            val resId = requireContext().resources.getIdentifier(
+                "cat_${entry.key.lowercase().replace(" ", "_")}",
+                "string",
+                requireContext().packageName
+            )
+            val displayName = if (resId != 0) getString(resId) else entry.key
+            displayName to entry.key
+        }
+        // Adapter shows localized display names
+        val adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_dropdown_item_1line,
+            categoryPairs.map { it.first }
+        )
         binding.actvCategory.setAdapter(adapter)
-        binding.actvCategory.setText(editOriginalCategory ?: AppLocationCategory.MONUMENT.key, false)
+
+        // Set initial selection from edit mode (or default to Monument)
+        val initialKey = editOriginalCategory ?: AppLocationCategory.MONUMENT.key
+        val initialDisplay = categoryPairs.firstOrNull { it.second == initialKey }?.first
+            ?: initialKey
+        binding.actvCategory.setText(initialDisplay, false)
     }
 
     // ── Photo Attachment ───────────────────────────────────────────
@@ -206,7 +230,10 @@ class AddLocationFragment : Fragment() {
             val title = binding.etTitle.text?.toString()?.trim()
             val description = binding.etDescription.text?.toString()?.trim()
             val coords = selectedLatLng
-            val category = binding.actvCategory.text.toString()
+            // Map the displayed localized name back to the category key
+            val selectedDisplayName = binding.actvCategory.text.toString()
+            val category = categoryPairs.firstOrNull { it.first == selectedDisplayName }?.second
+                ?: selectedDisplayName
 
             // Validation
             if (title.isNullOrEmpty()) {

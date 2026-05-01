@@ -123,7 +123,20 @@ class LocationDetailsBottomSheet private constructor() : BottomSheetDialogFragme
     private fun bindLocation(location: AppLocation) {
         binding.tvTitle.text = location.title
         binding.tvDescription.text = location.description
-        binding.tvCategory.text = location.category
+
+        // Resolve localized category string via resource identifier
+        val catKey = location.category.lowercase().replace(" ", "_")
+        val catResId = requireContext().resources.getIdentifier(
+            "cat_$catKey",
+            "string",
+            requireContext().packageName
+        )
+        binding.tvCategory.text = if (catResId != 0) {
+            getString(catResId)
+        } else {
+            location.category
+        }
+
         binding.tvCoordinates.text = "${location.latitude}, ${location.longitude}"
 
         // Image loading

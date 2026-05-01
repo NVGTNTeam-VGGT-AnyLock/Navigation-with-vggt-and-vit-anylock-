@@ -113,4 +113,51 @@
     <!-- Toast Messages -->
     <string name="toast_no_internet">Немає підключення до інтернету. Перевірте мережу.</string>
     <string name="toast_backend_unavailable">Бекенд недоступний. Повторна спроба…</string>
+    <!-- Category Names -->
+    <string name="cat_monument">Пам\'ятка</string>
+    <string name="cat_grocery">Продукти</string>
+    <string name="cat_gas_station">Заправка</string>
+    <string name="cat_restaurant">Ресторан</string>
+    <string name="cat_pharmacy">Аптека</string>
+    <string name="cat_no_category">Без категорії</string>
+
+    <!-- Mock Location 1: Kyiv Pechersk Lavra -->
+    <string name="mock_loc_1_title">Києво-Печерська Лавра</string>
+    <string name="mock_loc_1_desc">Історичний православний монастир, одна з найсвятіших святинь України.</string>
+
+    <!-- Mock Location 2: St. Sophia's Cathedral -->
+    <string name="mock_loc_2_title">Софійський собор</string>
+    <string name="mock_loc_2_desc">Об\'єкт Всесвітньої спадщини ЮНЕСКО з приголомшливими мозаїками та фресками XI століття.</string>
+
+    <!-- Mock Location 3: ARSENAL Art Metro Station Mural -->
+    <string name="mock_loc_3_title">Мурал на станції метро «Арсенальна»</string>
+    <string name="mock_loc_3_desc">Величезний сучасний мурал всередині станції метро «Арсенальна», перлина китайського стріт-арту.</string>
+
+    <!-- Mock Location 4: Kyiv Food Market -->
+    <string name="mock_loc_4_title">Київський фуд-маркет</string>
+    <string name="mock_loc_4_desc">Модний фуд-корт з українською кухнею та міжнародними стравами.</string>
+
+    <!-- Mock Location 5: Silpo – Kontraktova Square -->
+    <string name="mock_loc_5_title">Сільпо – Контрактова площа</string>
+    <string name="mock_loc_5_desc">Супермаркет з широким вибором місцевих продуктів та товарів.</string>
+
+    <!-- Mock Location 6: OKKO Gas Station (Obolon) -->
+    <string name="mock_loc_6_title">OKKO (Оболонь)</string>
+    <string name="mock_loc_6_desc">Автозаправна станція з магазином та автомийкою.</string>
+
+    <!-- Mock Location 7: Pharmacy 3A (Khreschatyk) -->
+    <string name="mock_loc_7_title">Аптека 3А (Хрещатик)</string>
+    <string name="mock_loc_7_desc">Цілодобова аптека в центрі Києва з широким асортиментом ліків.</string>
+
+    <!-- Mock Location 8: Kanapa Restaurant -->
+    <string name="mock_loc_8_title">Ресторан «Канапа»</string>
+    <string name="mock_loc_8_desc">Сучасна українська кухня в історичній будівлі з видом на Андріївський узвіз.</string>
+
+    <!-- Mock Location 9: Mural 'Usiky' by WIZ-ART -->
+    <string name="mock_loc_9_title">Мурал «Усіки» від WIZ-ART</string>
+    <string name="mock_loc_9_desc">Відомий мурал на житловому будинку, частина проєкту Kyiv Mural Project.</string>
+
+    <!-- Mock Location 10: Novus – Lvivska Ploshcha -->
+    <string name="mock_loc_10_title">Novus – Львівська площа</string>
+    <string name="mock_loc_10_desc">Сучасний супермаркет з органічним відділом та пекарнею.</string>
 </resources>
