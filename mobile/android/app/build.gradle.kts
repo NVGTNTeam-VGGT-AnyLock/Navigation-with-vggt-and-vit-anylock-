@@ -8,16 +8,24 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-// ── Load local.properties (gitignored, never committed) ──────────────
-val localProperties = Properties()
-val localPropertiesFile = rootProject.file("local.properties")
-if (localPropertiesFile.exists()) {
-    localProperties.load(FileInputStream(localPropertiesFile))
+// ── Secure API Key Injection ─────────────────────────────────────────
+// Reads MAPS_API_KEY from local.properties (gitignored) so the key is
+// never checked into version control.  Falls back to a dummy placeholder
+// if the file is absent (e.g. CI/CD), so the app still compiles.
+// ──────────────────────────────────────────────────────────────────────
+val localProperties = File(rootProject.rootDir, "local.properties")
+val mapsApiKey: String = if (localProperties.exists()) {
+    val props = Properties()
+    localProperties.inputStream().use { stream ->
+        props.load(stream)
+    }
+    props.getProperty("MAPS_API_KEY")?.trim()
+        ?: error("MAPS_API_KEY is missing in local.properties")
+} else {
+    // Fallback placeholder — maps UI will show a degraded view but the
+    // app will build & run safely in CI/CD or for new contributors.
+    "AIzaSyDUMMYKEY_FOR_CI_CD_DO_NOT_USE_IN_PRODUCTION"
 }
-
-val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY")
-    ?: error("MAPS_API_KEY not found in local.properties. " +
-        "Add MAPS_API_KEY=YOUR_KEY to mobile/android/local.properties")
 
 android {
     namespace = "com.navisense"
@@ -42,6 +50,10 @@ android {
          * e.g., "http://192.168.1.100:8000/"
          */
         buildConfigField("String", "BACKEND_URL", "\"http://10.0.2.2:8000/\"")
+
+        // Inject the Maps API key into AndroidManifest.xml via placeholder.
+        // The manifest references it as ${MAPS_API_KEY}.
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {

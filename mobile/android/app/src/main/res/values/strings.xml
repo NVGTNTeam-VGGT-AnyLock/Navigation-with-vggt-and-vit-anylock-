@@ -10,8 +10,8 @@
     <string name="tab_analytics">Analytics</string>
     <string name="tab_visual_search">Visual Search</string>
 
-    <!-- Search (legacy) -->
-    <string name="search_hint">Search delivery points…</string>
+    <!-- Search -->
+    <string name="search_hint">Search locations across title, description or category…</string>
 
     <!-- Filter Chips -->
     <string name="filter_all">All</string>
@@ -19,36 +19,50 @@
     <string name="filter_bicycle">Bicycle</string>
     <string name="filter_car">Car</string>
 
+    <!-- Advanced Filters -->
+    <string name="filter_visited">Visited</string>
+    <string name="filter_visited_only">Visited ✓</string>
+    <string name="filter_not_visited">Not Visited</string>
+    <string name="filter_favorites">Favorites</string>
+    <string name="filter_favorites_only">Favorites ✓</string>
+
     <!-- Map Screen -->
     <string name="my_location">My Location</string>
     <string name="radius_label">Radius:</string>
     <string name="radius_off">Off</string>
     <string name="match_found">Match Found!</string>
 
-    <!-- Map Interactions (legacy) -->
+    <!-- Map Interactions -->
     <string name="marker_added">📍 Marker added (%1$.4f, %2$.4f)</string>
     <string name="marker_removed">🗑️ Marker removed</string>
+
+    <!-- Language Toggle -->
+    <string name="lang_en">EN</string>
+    <string name="lang_uk">UK</string>
 
     <!-- Permissions -->
     <string name="permission_location_denied">Location permission is needed to show your position on the map.</string>
     <string name="permission_camera_denied">Camera permission is needed for visual positioning.</string>
 
-    <!-- Info Window Defaults (legacy) -->
+    <!-- Info Window Defaults -->
     <string name="marker_title_delivery_point">Delivery Point</string>
     <string name="marker_snippet_format">Tag: %s — Tap to edit</string>
 
     <!-- Location Details BottomSheet -->
     <string name="mark_as_visited">Mark as Visited</string>
-    <string name="visited_already">Already Visited</string>
+    <string name="visited_already">Already Visited ✓</string>
     <string name="delete">Delete</string>
+    <string name="edit">Edit</string>
 
-    <!-- Add Location Screen -->
+    <!-- Add / Edit Location Screen -->
     <string name="add_location_title">Add New Location</string>
+    <string name="edit_location_title">Edit Location</string>
     <string name="title_hint">Title</string>
     <string name="description_hint">Description</string>
     <string name="category_hint">Category</string>
     <string name="attach_photo">Attach Photo</string>
     <string name="save">Save</string>
+    <string name="update">Update</string>
     <string name="gallery">Gallery</string>
     <string name="camera">Camera</string>
     <string name="selected_position">Selected Position</string>
@@ -56,6 +70,7 @@
     <string name="required_field">This field is required</string>
     <string name="select_coords">Please tap on the map to select coordinates</string>
     <string name="location_saved">Location saved successfully!</string>
+    <string name="location_updated">Location updated successfully!</string>
 
     <!-- Route Builder Screen -->
     <string name="route_waypoints">Waypoints</string>
@@ -65,6 +80,9 @@
     <string name="route_end">End Point</string>
     <string name="start_navigation">Start Navigation</string>
     <string name="clear">Clear</string>
+    <string name="optimize_route">Optimize</string>
+    <string name="route_optimized">Route optimized! Middle waypoints reordered for shortest path.</string>
+    <string name="route_optimize_min">Need at least 3 waypoints to optimize.</string>
     <string name="route_empty">Please add at least one waypoint before starting navigation</string>
 
     <!-- Visual Search Screen -->
@@ -87,10 +105,12 @@
     <!-- Analytics Screen -->
     <string name="analytics_title">Analytics</string>
     <string name="category_distribution">Category Distribution</string>
+    <string name="status_histogram">Visited vs Favorites</string>
+    <string name="district_analysis">District Analysis</string>
     <string name="visited_stats">Visited vs Not Visited</string>
     <string name="total_locations">Total Locations</string>
 
-    <!-- Toast Messages (legacy) -->
+    <!-- Toast Messages -->
     <string name="toast_no_internet">No internet connection. Please check your network.</string>
     <string name="toast_backend_unavailable">Backend is not available. Retrying…</string>
 </resources>

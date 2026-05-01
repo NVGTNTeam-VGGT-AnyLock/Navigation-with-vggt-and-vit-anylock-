@@ -18,6 +18,7 @@ import kotlinx.parcelize.Parcelize
  * @property category    Category string (one of [AppLocationCategory.names]).
  * @property imageUri    URI string of an attached photo (local content URI or empty).
  * @property isVisited   Whether the user has visited this location.
+ * @property isFavorite  Whether the user has marked this location as a favorite (heart).
  */
 @Parcelize
 data class AppLocation(
@@ -28,5 +29,6 @@ data class AppLocation(
     val longitude: Double,
     val category: String = AppLocationCategory.MONUMENT.key,
     val imageUri: String = "",
-    val isVisited: Boolean = false
+    val isVisited: Boolean = false,
+    val isFavorite: Boolean = false
 ) : Parcelable

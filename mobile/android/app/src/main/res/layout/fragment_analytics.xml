@@ -43,7 +43,6 @@
                     android:textStyle="bold"
                     android:layout_marginBottom="8dp" />
 
-                <!-- Custom PieChart View (drawn in code) -->
                 <com.navisense.ui.analytics.PieChartView
                     android:id="@+id/pie_chart"
                     android:layout_width="match_parent"
@@ -53,7 +52,7 @@
 
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Bar Chart: Visited vs Not Visited -->
+        <!-- Bar Chart: Visited vs Favorites -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -70,16 +69,46 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/visited_stats"
+                    android:text="@string/status_histogram"
                     android:textAppearance="?attr/textAppearanceTitleMedium"
                     android:textStyle="bold"
                     android:layout_marginBottom="8dp" />
 
-                <!-- Custom BarChart View (drawn in code) -->
                 <com.navisense.ui.analytics.BarChartView
                     android:id="@+id/bar_chart"
                     android:layout_width="match_parent"
                     android:layout_height="200dp" />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- District Analysis: Horizontal Bar Chart -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardElevation="2dp"
+            app:cardCornerRadius="12dp"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/district_analysis"
+                    android:textAppearance="?attr/textAppearanceTitleMedium"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <com.navisense.ui.analytics.DistrictBarChartView
+                    android:id="@+id/district_chart"
+                    android:layout_width="match_parent"
+                    android:layout_height="250dp" />
 
             </LinearLayout>
 

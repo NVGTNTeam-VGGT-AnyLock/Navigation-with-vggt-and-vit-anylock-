@@ -17,7 +17,8 @@ import kotlinx.coroutines.launch
 /**
  * Analytics screen displaying:
  * - A PieChart showing location distribution by category.
- * - A BarChart showing Visited vs Not Visited counts.
+ * - A BarChart showing Visited vs Not Visited vs Favorites vs Others counts.
+ * - A DistrictBarChart showing location counts per Kyiv district.
  * - Total location count.
  *
  * All data is read-only, derived from [MainViewModel.analyticsData].
@@ -44,7 +45,13 @@ class AnalyticsFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.analyticsData.collectLatest { data ->
                     binding.pieChart.setData(data.categoryCounts)
-                    binding.barChart.setData(data.visitedCount, data.notVisitedCount)
+                    binding.barChart.setData(
+                        visited = data.visitedCount,
+                        notVisited = data.notVisitedCount,
+                        favorites = data.favoriteCount,
+                        notFavorites = data.notFavoriteCount
+                    )
+                    binding.districtChart.setData(data.districtCounts)
                     binding.tvTotalCount.text = data.totalCount.toString()
                 }
             }
