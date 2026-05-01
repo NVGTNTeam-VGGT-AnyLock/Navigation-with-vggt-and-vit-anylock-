@@ -138,8 +138,14 @@ class ScannerCamera(
      * Captures a single image, validates its sharpness, and saves it via FileManagerService
      * only if the image passes the blur detection.
      *
-     * @param onSuccess Callback invoked with the saved File when capture and validation succeed.
-     * @param onError Callback invoked when an error occurs (camera error, blurry image, I/O error, etc.).
+     * The heavy work (blur detection, JPEG encoding) executes on the camera background executor.
+     * The [onSuccess] and [onError] callbacks are always dispatched to the **main thread**
+     * so callers may safely update UI elements and show Toasts without additional thread routing.
+     *
+     * @param onSuccess Callback invoked on the **main thread** with the saved File
+     *                  when capture and validation succeed.
+     * @param onError Callback invoked on the **main thread** when an error occurs
+     *                (camera error, blurry image, I/O error, etc.).
      */
     fun captureSharpImage(
         onSuccess: (File) -> Unit,
@@ -150,47 +156,61 @@ class ScannerCamera(
             return
         }
 
+        // Main-thread executor for dispatching results to callers
+        val mainExecutor = ContextCompat.getMainExecutor(context)
+
         imageCapture.takePicture(
-            cameraExecutor,
+            cameraExecutor, // Background executor for heavy computation
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
                     try {
+                        // ── Heavy work (runs on cameraExecutor background thread) ──
                         // Convert ImageProxy to Bitmap using the built-in
                         // ImageProxy.toBitmap() from CameraX 1.4+ (no shadowing)
                         val bitmap = imageProxy.toBitmap()
                         imageProxy.close()
 
-                        // Validate sharpness
+                        // Validate sharpness (Laplacian variance — expensive)
                         if (!isImageBlurry(bitmap)) {
                             // Convert to JPEG bytes
                             val jpegBytes = bitmap.toJpegBytes(quality = 85)
                             // Save via FileManagerService
                             val savedFile = fileManagerService.saveImage(jpegBytes)
                             Log.d(tag, "Sharp image saved: ${savedFile.absolutePath}")
-                            onSuccess(savedFile)
+
+                            // ── Dispatch success to main thread ──
+                            mainExecutor.execute {
+                                onSuccess(savedFile)
+                            }
                         } else {
                             Log.d(tag, "Image rejected: too blurry")
-                            onError(ImageTooBlurryException("Captured image is too blurry"))
+                            // ── Dispatch error to main thread ──
+                            mainExecutor.execute {
+                                onError(ImageTooBlurryException("Captured image is too blurry"))
+                            }
                         }
                     } catch (e: FileManagerService.InsufficientStorageException) {
                         Log.e(tag, "Insufficient storage", e)
                         fileManagerService.logError("Insufficient storage: ${e.message}")
-                        onError(e)
+                        mainExecutor.execute { onError(e) }
                     } catch (e: FileManagerService.FileManagerException) {
                         Log.e(tag, "File manager error", e)
                         fileManagerService.logError("File manager error: ${e.message}")
-                        onError(e)
+                        mainExecutor.execute { onError(e) }
                     } catch (e: Exception) {
                         Log.e(tag, "Unexpected error during image processing", e)
                         fileManagerService.logError("Unexpected error during image processing: ${e.message}")
-                        onError(e)
+                        mainExecutor.execute { onError(e) }
                     }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e(tag, "Image capture failed", exception)
                     fileManagerService.logError("Image capture failed: ${exception.message}")
-                    onError(exception)
+                    // ── Dispatch error to main thread ──
+                    mainExecutor.execute {
+                        onError(exception)
+                    }
                 }
             }
         )

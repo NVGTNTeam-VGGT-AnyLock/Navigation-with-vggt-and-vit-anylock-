@@ -40,6 +40,7 @@
     <!-- ── Application ──────────────────────────────────────────── -->
 
     <application
+        android:name=".NaviSenseApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -64,7 +65,7 @@
         -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyChztjBG3tb0_RS9uvx5Lk8iET84hBoho4" />
+            android:value="${MAPS_API_KEY}" />
 
         <!-- Main Activity (single-activity architecture) -->
         <activity
