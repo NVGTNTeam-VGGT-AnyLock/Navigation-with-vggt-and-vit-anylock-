@@ -36,7 +36,7 @@ import kotlin.math.*
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Repository (swap here when Room is ready) ──────────────────
-    private val repository: LocationRepository = MockLocationRepositoryImpl()
+    private val repository = MockLocationRepositoryImpl(application)
 
     // ── State: All Locations ───────────────────────────────────────
     val allLocations: StateFlow<List<AppLocation>> = repository.getAllLocations()
@@ -71,7 +71,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             // Category filter
             if (category != null) {
-                result = result.filter { it.category == category }
+                // КРИТИЧНИЙ ФІКС: Безпечне порівняння без врахування регістру
+                result = result.filter { it.category.equals(category, ignoreCase = true) }
             }
 
             // Fuzzy search: query matches title, description, OR category
@@ -166,6 +167,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Desnyanskyi (north-east, left bank)
             else -> "Desnyanskyi"
         }
+    }
+
+    // ── Localization ──────────────────────────────────────────────
+
+    /**
+     * Re-resolve all seed location strings from the current locale.
+     * Call this after the application locale changes (e.g. from
+     * [com.navisense.ui.map.MapFragment]'s language toggle).
+     */
+    fun refreshLocalizedData() {
+        repository.refreshLocalizedData()
     }
 
     // ── Public API ─────────────────────────────────────────────────

@@ -1,5 +1,7 @@
 package com.navisense.data
 
+import android.content.Context
+import com.navisense.R
 import com.navisense.model.AppLocation
 import com.navisense.model.AppLocationCategory
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,18 +11,117 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * In-memory mock implementation of [LocationRepository].
  *
+ * **Localization:** Seed data is defined via string resource IDs so titles and
+ * descriptions are resolved through [Context] at runtime. Call
+ * [refreshLocalizedData] after the application locale changes to re-resolve all
+ * strings from the current locale's resources.
+ *
+ * **State persistence across locale switches:** Mutable state (visited, favorite)
+ * is tracked directly inside [SeedRef] instances stored in [seedRefs]. When
+ * [toggleVisited], [toggleFavorite] or [updateLocation] touch a seed location,
+ * the corresponding [SeedRef] is mutated **before** [resolveAll] is called, so
+ * the state survives [refreshLocalizedData].
+ *
  * **Anya:** When Room is ready, create a `RoomLocationRepositoryImpl` that
  * implements the same [LocationRepository] interface, inject it in place of
  * this class, and the entire app just works — no ViewModel / UI changes needed.
- *
- * Seed data represents notable points of interest around Kyiv, Ukraine.
  */
-class MockLocationRepositoryImpl : LocationRepository {
+class MockLocationRepositoryImpl(private val context: Context) : LocationRepository {
 
-    private val _locations = MutableStateFlow<List<AppLocation>>(SEED_DATA)
+    /** Internal metadata for seed locations (resource IDs, not resolved strings). */
+    private data class SeedRef(
+        val id: Int,
+        val titleRes: Int,
+        val descRes: Int,
+        val lat: Double,
+        val lng: Double,
+        val category: String,
+        /** Mutable — preserved across [refreshLocalizedData] calls. */
+        var visited: Boolean,
+        /** Mutable — preserved across [refreshLocalizedData] calls. */
+        var favorite: Boolean
+    )
+
+    /**
+     * All seed references — defined once, mutated in-place by toggle/update
+     * operations so state survives language switches.
+     */
+    private val seedRefs = mutableListOf(
+        // 1: Kyiv Pechersk Lavra
+        SeedRef(1, R.string.mock_loc_1_title, R.string.mock_loc_1_desc,
+            50.4347, 30.5590, AppLocationCategory.MONUMENT.key, visited = true, favorite = true),
+        // 2: St. Sophia's Cathedral
+        SeedRef(2, R.string.mock_loc_2_title, R.string.mock_loc_2_desc,
+            50.4547, 30.5190, AppLocationCategory.MONUMENT.key, visited = false, favorite = true),
+        // 3: ARSENAL Art Metro Station Mural
+        SeedRef(3, R.string.mock_loc_3_title, R.string.mock_loc_3_desc,
+            50.4444, 30.5385, AppLocationCategory.MONUMENT.key, visited = true, favorite = false),
+        // 4: Kyiv Food Market
+        SeedRef(4, R.string.mock_loc_4_title, R.string.mock_loc_4_desc,
+            50.4584, 30.5158, AppLocationCategory.RESTAURANT.key, visited = false, favorite = false),
+        // 5: Silpo – Kontraktova Square
+        SeedRef(5, R.string.mock_loc_5_title, R.string.mock_loc_5_desc,
+            50.4664, 30.5150, AppLocationCategory.GROCERY.key, visited = false, favorite = false),
+        // 6: OKKO Gas Station (Obolon)
+        SeedRef(6, R.string.mock_loc_6_title, R.string.mock_loc_6_desc,
+            50.5019, 30.4983, AppLocationCategory.GAS_STATION.key, visited = true, favorite = false),
+        // 7: Pharmacy 3A (Khreschatyk)
+        SeedRef(7, R.string.mock_loc_7_title, R.string.mock_loc_7_desc,
+            50.4474, 30.5215, AppLocationCategory.PHARMACY.key, visited = false, favorite = true),
+        // 8: Kanapa Restaurant
+        SeedRef(8, R.string.mock_loc_8_title, R.string.mock_loc_8_desc,
+            50.4605, 30.5140, AppLocationCategory.RESTAURANT.key, visited = true, favorite = false),
+        // 9: Mural 'Usiky' by WIZ-ART
+        SeedRef(9, R.string.mock_loc_9_title, R.string.mock_loc_9_desc,
+            50.4385, 30.5490, AppLocationCategory.MONUMENT.key, visited = false, favorite = false),
+        // 10: Novus – Lvivska Ploshcha
+        SeedRef(10, R.string.mock_loc_10_title, R.string.mock_loc_10_desc,
+            50.4498, 30.5100, AppLocationCategory.GROCERY.key, visited = false, favorite = false)
+    )
+
+    /**
+     * Locations added at runtime by the user (stored as-is, not resource-backed).
+     * When a seed location is edited via [updateLocation], it is removed from
+     * [seedRefs] and moved here as a plain [AppLocation].
+     */
+    private val addedLocations = mutableListOf<AppLocation>()
+
+    /** Resolved + user locations emitted as a reactive stream. */
+    private val _locations = MutableStateFlow(resolveAll())
+
+    /** Resolve a [SeedRef] into a fully-localized [AppLocation] using the current [Context]. */
+    private fun SeedRef.toAppLocation(): AppLocation = AppLocation(
+        id = id,
+        title = context.getString(titleRes),
+        description = context.getString(descRes),
+        latitude = lat,
+        longitude = lng,
+        category = category,
+        isVisited = visited,
+        isFavorite = favorite
+    )
+
+    /** Combine resolved seed data with user-added locations. Reads current [SeedRef] state. */
+    private fun resolveAll(): List<AppLocation> =
+        seedRefs.map { it.toAppLocation() } + addedLocations
+
+    // ── Public API ──────────────────────────────────────────────────
 
     override fun getAllLocations(): StateFlow<List<AppLocation>> =
         _locations.asStateFlow()
+
+    /**
+     * Re-resolve all seed location strings from the current locale's resources
+     * and emit the updated list. Call this after [android.os.LocaleList] changes
+     * so the UI reflects the newly selected language.
+     *
+     * **State safety:** Visited/favorite toggles applied via [toggleVisited] /
+     * [toggleFavorite] are stored inside [seedRefs] and will **not** be wiped
+     * by this call.
+     */
+    fun refreshLocalizedData() {
+        _locations.value = resolveAll()
+    }
 
     override suspend fun getLocationById(id: Int): AppLocation? =
         _locations.value.firstOrNull { it.id == id }
@@ -28,136 +129,54 @@ class MockLocationRepositoryImpl : LocationRepository {
     override suspend fun insertLocation(location: AppLocation): Int {
         val newId = (_locations.value.maxOfOrNull { it.id } ?: 0) + 1
         val newLocation = location.copy(id = newId)
+        addedLocations.add(newLocation)
         _locations.value = _locations.value + newLocation
         return newId
     }
 
     override suspend fun updateLocation(location: AppLocation) {
-        _locations.value = _locations.value.map {
-            if (it.id == location.id) location else it
+        // If it was a seed location, remove from seeds and track as user-modified
+        seedRefs.removeAll { it.id == location.id }
+
+        // Update in addedLocations or add as user-modified
+        val addedIndex = addedLocations.indexOfFirst { it.id == location.id }
+        if (addedIndex >= 0) {
+            addedLocations[addedIndex] = location
+        } else {
+            addedLocations.add(location)
         }
+
+        _locations.value = resolveAll()
     }
 
     override suspend fun deleteLocation(id: Int) {
-        _locations.value = _locations.value.filter { it.id != id }
+        // Remove from user-added list
+        addedLocations.removeAll { it.id == id }
+        // Remove from seeds (user explicitly deleted it)
+        seedRefs.removeAll { it.id == id }
+        // Re-emit
+        _locations.value = resolveAll()
     }
 
     override suspend fun toggleVisited(id: Int) {
-        _locations.value = _locations.value.map {
-            if (it.id == id) it.copy(isVisited = !it.isVisited) else it
+        // Mutate SeedRef directly so state survives refreshLocalizedData()
+        seedRefs.firstOrNull { it.id == id }?.let { seed ->
+            seed.visited = !seed.visited
         }
+        // Also update in addedLocations if present
+        addedLocations.replaceAll { if (it.id == id) it.copy(isVisited = !it.isVisited) else it }
+        // Re-emit combined list
+        _locations.value = resolveAll()
     }
 
     override suspend fun toggleFavorite(id: Int) {
-        _locations.value = _locations.value.map {
-            if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it
+        // Mutate SeedRef directly so state survives refreshLocalizedData()
+        seedRefs.firstOrNull { it.id == id }?.let { seed ->
+            seed.favorite = !seed.favorite
         }
-    }
-
-    companion object {
-        /** Seed data: well-known landmarks / street art / points of interest
-         *  around Kyiv, demonstrating varied categories. */
-        private val SEED_DATA = listOf(
-            AppLocation(
-                id = 1,
-                title = "Kyiv Pechersk Lavra",
-                description = "Historic Orthodox Christian monastery, one of the most sacred sites in Ukraine.",
-                latitude = 50.4347,
-                longitude = 30.5590,
-                category = AppLocationCategory.MONUMENT.key,
-                isVisited = true,
-                isFavorite = true
-            ),
-            AppLocation(
-                id = 2,
-                title = "St. Sophia's Cathedral",
-                description = "UNESCO World Heritage site with stunning mosaics and frescoes from the 11th century.",
-                latitude = 50.4547,
-                longitude = 30.5190,
-                category = AppLocationCategory.MONUMENT.key,
-                isVisited = false,
-                isFavorite = true
-            ),
-            AppLocation(
-                id = 3,
-                title = "ARSENAL Art Metro Station Mural",
-                description = "Massive contemporary mural inside the ARSENAL metro station, Kyiv's street art gem.",
-                latitude = 50.4444,
-                longitude = 30.5385,
-                category = AppLocationCategory.MONUMENT.key,
-                isVisited = true,
-                isFavorite = false
-            ),
-            AppLocation(
-                id = 4,
-                title = "Kyiv Food Market",
-                description = "Trendy food court with local Ukrainian cuisine and international options.",
-                latitude = 50.4584,
-                longitude = 30.5158,
-                category = AppLocationCategory.RESTAURANT.key,
-                isVisited = false,
-                isFavorite = false
-            ),
-            AppLocation(
-                id = 5,
-                title = "Silpo – Kontraktova Square",
-                description = "Supermarket with a curated selection of local produce and groceries.",
-                latitude = 50.4664,
-                longitude = 30.5150,
-                category = AppLocationCategory.GROCERY.key,
-                isVisited = false,
-                isFavorite = false
-            ),
-            AppLocation(
-                id = 6,
-                title = "OKKO Gas Station (Obolon)",
-                description = "Full-service gas station with convenience store and car wash.",
-                latitude = 50.5019,
-                longitude = 30.4983,
-                category = AppLocationCategory.GAS_STATION.key,
-                isVisited = true,
-                isFavorite = false
-            ),
-            AppLocation(
-                id = 7,
-                title = "Pharmacy 3A (Khreschatyk)",
-                description = "24-hour pharmacy in central Kyiv with a wide range of medications.",
-                latitude = 50.4474,
-                longitude = 30.5215,
-                category = AppLocationCategory.PHARMACY.key,
-                isVisited = false,
-                isFavorite = true
-            ),
-            AppLocation(
-                id = 8,
-                title = "Kanapa Restaurant",
-                description = "Modern Ukrainian cuisine in a historic building overlooking Andriyivskyi descent.",
-                latitude = 50.4605,
-                longitude = 30.5140,
-                category = AppLocationCategory.RESTAURANT.key,
-                isVisited = true,
-                isFavorite = false
-            ),
-            AppLocation(
-                id = 9,
-                title = "Mural 'Usiky' by WIZ-ART",
-                description = "Famous street art mural on a residential building, part of the Kyiv Mural Project.",
-                latitude = 50.4385,
-                longitude = 30.5490,
-                category = AppLocationCategory.MONUMENT.key,
-                isVisited = false,
-                isFavorite = false
-            ),
-            AppLocation(
-                id = 10,
-                title = "Novus – Lvivska Ploshcha",
-                description = "Modern supermarket with organic section and bakery.",
-                latitude = 50.4498,
-                longitude = 30.5100,
-                category = AppLocationCategory.GROCERY.key,
-                isVisited = false,
-                isFavorite = false
-            )
-        )
+        // Also update in addedLocations if present
+        addedLocations.replaceAll { if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it }
+        // Re-emit combined list
+        _locations.value = resolveAll()
     }
 }

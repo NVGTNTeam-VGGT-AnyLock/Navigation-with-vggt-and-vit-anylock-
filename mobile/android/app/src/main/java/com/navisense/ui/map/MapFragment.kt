@@ -13,7 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.viewModels
+import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -40,7 +40,7 @@ class MapFragment : Fragment() {
     private var _binding: FragmentMapBinding? = null
     private val binding get() = _binding!!
 
-    private val viewModel: MainViewModel by viewModels()
+    private val viewModel: MainViewModel by activityViewModels()
     private lateinit var map: GoogleMap
     private lateinit var fusedLocationClient: FusedLocationProviderClient
 
@@ -81,6 +81,10 @@ class MapFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
+
+        // After locale switch (Activity recreation), re-resolve mock data strings
+        // so seed location titles/descriptions reflect the new language.
+        viewModel.refreshLocalizedData()
 
         initMapFragment()
         initSearchBar()
@@ -136,33 +140,53 @@ class MapFragment : Fragment() {
 
     private fun initCategoryChips() {
         val chipGroup = binding.chipGroupCategories
+        chipGroup.removeAllViews()
+        chipGroup.isSingleSelection = true
+        chipGroup.isSelectionRequired = true
 
-        // "All" chip first
-        val allChip = Chip(requireContext(), null, com.google.android.material.R.style.Widget_Material3_Chip_Filter)
-        allChip.text = getString(R.string.filter_all)
-        allChip.isCheckable = true
-        allChip.isCheckedIconVisible = true
-        allChip.isChecked = true
-        allChip.tag = null // null means "All"
-        allChip.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) viewModel.setCategoryFilter(null)
+        // "All" chip
+        val allChip = Chip(requireContext()).apply {
+            id = View.generateViewId()
+            text = getString(R.string.filter_all)
+            tag = null // null means "All"
+            isClickable = true
+            isCheckable = true
+            isFocusable = true
         }
         chipGroup.addView(allChip)
 
-        // One chip per category (excluding NO_CATEGORY from chip filter)
+        // Category chips
         AppLocationCategory.entries.filter { it != AppLocationCategory.NO_CATEGORY }.forEach { category ->
-            val chip = Chip(requireContext(), null, com.google.android.material.R.style.Widget_Material3_Chip_Filter)
-            chip.text = category.key
-            chip.isCheckable = true
-            chip.isCheckedIconVisible = true
-            chip.tag = category.key
-            chip.setOnCheckedChangeListener { _, isChecked ->
-                if (isChecked) viewModel.setCategoryFilter(category.key)
+            val chip = Chip(requireContext()).apply {
+                id = View.generateViewId()
+
+                // Bilingual: if a translated string resource exists (e.g. cat_monument), use it.
+                // Otherwise fall back to the English key.
+                val resName = "cat_${category.name.lowercase(Locale.ROOT)}"
+                val resId = resources.getIdentifier(resName, "string", requireContext().packageName)
+                text = if (resId != 0) getString(resId) else category.key
+
+                tag = category.key
+                isClickable = true
+                isCheckable = true
+                isFocusable = true
             }
             chipGroup.addView(chip)
         }
 
-        chipGroup.isSingleSelection = true
+        // Listen for chip selection changes on the group level
+        chipGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val selectedChip = group.findViewById<Chip>(checkedIds.first())
+                val categoryKey = selectedChip?.tag as? String
+                viewModel.setCategoryFilter(categoryKey)
+            } else {
+                viewModel.setCategoryFilter(null)
+            }
+        }
+
+        // Select "All" by default
+        chipGroup.check(allChip.id)
     }
 
     // ── Advanced Filters: Visited & Favorites ──────────────────────

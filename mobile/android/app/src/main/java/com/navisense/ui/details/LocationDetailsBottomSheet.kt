@@ -5,7 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.viewModels
+import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -35,7 +35,7 @@ class LocationDetailsBottomSheet private constructor() : BottomSheetDialogFragme
     private var _binding: BottomSheetLocationDetailsBinding? = null
     private val binding get() = _binding!!
 
-    private val viewModel: MainViewModel by viewModels()
+    private val viewModel: MainViewModel by activityViewModels()
     private var locationId: Int = -1
     private var currentLocation: AppLocation? = null
 
@@ -123,7 +123,20 @@ class LocationDetailsBottomSheet private constructor() : BottomSheetDialogFragme
     private fun bindLocation(location: AppLocation) {
         binding.tvTitle.text = location.title
         binding.tvDescription.text = location.description
-        binding.tvCategory.text = location.category
+
+        // Resolve localized category string via resource identifier
+        val catKey = location.category.lowercase().replace(" ", "_")
+        val catResId = requireContext().resources.getIdentifier(
+            "cat_$catKey",
+            "string",
+            requireContext().packageName
+        )
+        binding.tvCategory.text = if (catResId != 0) {
+            getString(catResId)
+        } else {
+            location.category
+        }
+
         binding.tvCoordinates.text = "${location.latitude}, ${location.longitude}"
 
         // Image loading
