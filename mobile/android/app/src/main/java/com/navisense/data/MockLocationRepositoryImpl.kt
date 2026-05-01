@@ -16,6 +16,12 @@ import kotlinx.coroutines.flow.asStateFlow
  * [refreshLocalizedData] after the application locale changes to re-resolve all
  * strings from the current locale's resources.
  *
+ * **State persistence across locale switches:** Mutable state (visited, favorite)
+ * is tracked directly inside [SeedRef] instances stored in [seedRefs]. When
+ * [toggleVisited], [toggleFavorite] or [updateLocation] touch a seed location,
+ * the corresponding [SeedRef] is mutated **before** [resolveAll] is called, so
+ * the state survives [refreshLocalizedData].
+ *
  * **Anya:** When Room is ready, create a `RoomLocationRepositoryImpl` that
  * implements the same [LocationRepository] interface, inject it in place of
  * this class, and the entire app just works — no ViewModel / UI changes needed.
@@ -30,12 +36,17 @@ class MockLocationRepositoryImpl(private val context: Context) : LocationReposit
         val lat: Double,
         val lng: Double,
         val category: String,
-        val visited: Boolean,
-        val favorite: Boolean
+        /** Mutable — preserved across [refreshLocalizedData] calls. */
+        var visited: Boolean,
+        /** Mutable — preserved across [refreshLocalizedData] calls. */
+        var favorite: Boolean
     )
 
-    /** All seed references — defined once, resolved dynamically on every refresh. */
-    private val seedRefs: List<SeedRef> = listOf(
+    /**
+     * All seed references — defined once, mutated in-place by toggle/update
+     * operations so state survives language switches.
+     */
+    private val seedRefs = mutableListOf(
         // 1: Kyiv Pechersk Lavra
         SeedRef(1, R.string.mock_loc_1_title, R.string.mock_loc_1_desc,
             50.4347, 30.5590, AppLocationCategory.MONUMENT.key, visited = true, favorite = true),
@@ -68,13 +79,17 @@ class MockLocationRepositoryImpl(private val context: Context) : LocationReposit
             50.4498, 30.5100, AppLocationCategory.GROCERY.key, visited = false, favorite = false)
     )
 
-    /** Locations added at runtime by the user (stored as-is, not resource-backed). */
+    /**
+     * Locations added at runtime by the user (stored as-is, not resource-backed).
+     * When a seed location is edited via [updateLocation], it is removed from
+     * [seedRefs] and moved here as a plain [AppLocation].
+     */
     private val addedLocations = mutableListOf<AppLocation>()
 
     /** Resolved + user locations emitted as a reactive stream. */
     private val _locations = MutableStateFlow(resolveAll())
 
-    /** Seed a [SeedRef] into a fully-localized [AppLocation] using the current [Context]. */
+    /** Resolve a [SeedRef] into a fully-localized [AppLocation] using the current [Context]. */
     private fun SeedRef.toAppLocation(): AppLocation = AppLocation(
         id = id,
         title = context.getString(titleRes),
@@ -86,7 +101,7 @@ class MockLocationRepositoryImpl(private val context: Context) : LocationReposit
         isFavorite = favorite
     )
 
-    /** Combine resolved seed data with user-added locations. */
+    /** Combine resolved seed data with user-added locations. Reads current [SeedRef] state. */
     private fun resolveAll(): List<AppLocation> =
         seedRefs.map { it.toAppLocation() } + addedLocations
 
@@ -99,6 +114,10 @@ class MockLocationRepositoryImpl(private val context: Context) : LocationReposit
      * Re-resolve all seed location strings from the current locale's resources
      * and emit the updated list. Call this after [android.os.LocaleList] changes
      * so the UI reflects the newly selected language.
+     *
+     * **State safety:** Visited/favorite toggles applied via [toggleVisited] /
+     * [toggleFavorite] are stored inside [seedRefs] and will **not** be wiped
+     * by this call.
      */
     fun refreshLocalizedData() {
         _locations.value = resolveAll()
@@ -116,35 +135,48 @@ class MockLocationRepositoryImpl(private val context: Context) : LocationReposit
     }
 
     override suspend fun updateLocation(location: AppLocation) {
-        // Update in addedLocations if it was user-added
+        // If it was a seed location, remove from seeds and track as user-modified
+        seedRefs.removeAll { it.id == location.id }
+
+        // Update in addedLocations or add as user-modified
         val addedIndex = addedLocations.indexOfFirst { it.id == location.id }
         if (addedIndex >= 0) {
             addedLocations[addedIndex] = location
+        } else {
+            addedLocations.add(location)
         }
-        // Update the combined list
-        _locations.value = _locations.value.map {
-            if (it.id == location.id) location else it
-        }
+
+        _locations.value = resolveAll()
     }
 
     override suspend fun deleteLocation(id: Int) {
+        // Remove from user-added list
         addedLocations.removeAll { it.id == id }
-        // Seed locations are never deleted; only remove from combined list
-        _locations.value = _locations.value.filter { it.id != id }
+        // Remove from seeds (user explicitly deleted it)
+        seedRefs.removeAll { it.id == id }
+        // Re-emit
+        _locations.value = resolveAll()
     }
 
     override suspend fun toggleVisited(id: Int) {
+        // Mutate SeedRef directly so state survives refreshLocalizedData()
+        seedRefs.firstOrNull { it.id == id }?.let { seed ->
+            seed.visited = !seed.visited
+        }
         // Also update in addedLocations if present
         addedLocations.replaceAll { if (it.id == id) it.copy(isVisited = !it.isVisited) else it }
-        _locations.value = _locations.value.map {
-            if (it.id == id) it.copy(isVisited = !it.isVisited) else it
-        }
+        // Re-emit combined list
+        _locations.value = resolveAll()
     }
 
     override suspend fun toggleFavorite(id: Int) {
-        addedLocations.replaceAll { if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it }
-        _locations.value = _locations.value.map {
-            if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it
+        // Mutate SeedRef directly so state survives refreshLocalizedData()
+        seedRefs.firstOrNull { it.id == id }?.let { seed ->
+            seed.favorite = !seed.favorite
         }
+        // Also update in addedLocations if present
+        addedLocations.replaceAll { if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it }
+        // Re-emit combined list
+        _locations.value = resolveAll()
     }
 }
