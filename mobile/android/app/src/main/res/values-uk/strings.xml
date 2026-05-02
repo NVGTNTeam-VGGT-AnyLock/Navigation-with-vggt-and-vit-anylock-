@@ -82,6 +82,7 @@
     <string name="clear">Очистити</string>
     <string name="optimize_route">Оптимізувати</string>
     <string name="route_optimized">Маршрут оптимізовано! Проміжні точки впорядковано для найкоротшого шляху.</string>
+    <string name="route_optimizing">Оптимізація маршруту через Google Maps…</string>
     <string name="route_optimize_min">Потрібно щонайменше 3 точки для оптимізації.</string>
     <string name="route_empty">Будь ласка, додайте хоча б одну точку маршруту</string>
 

@@ -1,12 +1,19 @@
 package com.navisense.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.DirectionsApi
+import com.google.maps.GeoApiContext
+import com.google.maps.android.PolyUtil
+import com.navisense.BuildConfig
 import com.navisense.data.LocationRepository
 import com.navisense.data.MockLocationRepositoryImpl
 import com.navisense.model.AppLocation
 import com.navisense.model.AppLocationCategory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlin.math.*
+import kotlinx.coroutines.withContext
 
 /**
  * Shared ViewModel for the entire Location Management App.
@@ -34,6 +41,18 @@ import kotlin.math.*
  * - [analyticsData] — computed stats for the Analytics screen
  */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    companion object {
+        /**
+         * Singleton [GeoApiContext] initialised once with the API key from
+         * [BuildConfig]. Used for all Google Maps API requests (Directions, etc.).
+         */
+        private val geoApiContext: GeoApiContext by lazy {
+            GeoApiContext.Builder()
+                .apiKey(BuildConfig.MAPS_API_KEY)
+                .build()
+        }
+    }
 
     // ── Repository (swap here when Room is ready) ──────────────────
     private val repository = MockLocationRepositoryImpl(application)
@@ -107,8 +126,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val routeWaypoints: StateFlow<List<AppLocation>> = _routeWaypoints.asStateFlow()
 
     // ── State: Optimized route polyline points ─────────────────────
-    private val _routePolylinePoints = MutableStateFlow<List<Pair<Double, Double>>>(emptyList())
-    val routePolylinePoints: StateFlow<List<Pair<Double, Double>>> = _routePolylinePoints.asStateFlow()
+    private val _routePolylinePoints = MutableStateFlow<List<LatLng>>(emptyList())
+    val routePolylinePoints: StateFlow<List<LatLng>> = _routePolylinePoints.asStateFlow()
+
+    // ── State: Optimisation in progress ────────────────────────────
+    private val _isOptimizing = MutableStateFlow(false)
+    val isOptimizing: StateFlow<Boolean> = _isOptimizing.asStateFlow()
 
     // ── State: Visual Search Mock Result ──────────────────────────
     private val _mockMatchLocation = MutableStateFlow<AppLocation?>(null)
@@ -260,7 +283,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             _routeWaypoints.value = current + location
         }
-        recalculateRoute()
+        // Clear stale polyline — user must tap "Optimize Route" to re-request
+        _routePolylinePoints.value = emptyList()
     }
 
     fun clearRouteWaypoints() {
@@ -269,87 +293,95 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Reorder middle waypoints to find the shortest total path (TSP heuristic).
-     * First waypoint MUST remain start, last MUST remain finish.
-     * Middle waypoints are permuted to minimize total Haversine distance.
+     * Optimize the route order via the **Google Directions API** with
+     * `optimizeWaypoints=true`.
+     *
+     * - First waypoint → `origin`
+     * - Last waypoint  → `destination`
+     * - Middle waypoints are passed to the API and re-ordered by Google's
+     *   built-in TSP solver.
+     *
+     * On success the [routePolylinePoints] are updated with the decoded
+     * road-aware polyline, and [routeWaypoints] reflects the optimised order.
+     * On failure the error is logged and straight-line segments are drawn
+     * as a fallback.
      */
     fun optimizeRoute() {
         val waypoints = _routeWaypoints.value
-        if (waypoints.size <= 3) {
-            recalculateRoute()
-            return
-        }
-
-        val start = waypoints.first()
-        val end = waypoints.last()
-        val middle = waypoints.subList(1, waypoints.size - 1)
-
-        // Use nearest-neighbor heuristic for TSP on middle points
-        val optimizedMiddle = mutableListOf<AppLocation>()
-        val remaining = middle.toMutableList()
-        var current = start
-
-        while (remaining.isNotEmpty()) {
-            val nearest = remaining.minByOrNull {
-                haversineDistance(
-                    current.latitude, current.longitude,
-                    it.latitude, it.longitude
-                )
-            } ?: break
-            optimizedMiddle.add(nearest)
-            remaining.remove(nearest)
-            current = nearest
-        }
-
-        val optimized = listOf(start) + optimizedMiddle + listOf(end)
-        _routeWaypoints.value = optimized
-        recalculateRoute()
-    }
-
-    /** Recalculate the polyline path for the current waypoints. */
-    private fun recalculateRoute() {
-        val waypoints = _routeWaypoints.value
-        if (waypoints.isEmpty()) {
+        if (waypoints.size < 2) {
             _routePolylinePoints.value = emptyList()
             return
         }
 
-        // Generate mock "road-aware" polyline by interpolating with slight
-        // offsets to simulate streets between waypoints.
-        val points = mutableListOf<Pair<Double, Double>>()
-        for (i in 0 until waypoints.size - 1) {
-            val from = waypoints[i]
-            val to = waypoints[i + 1]
-            // Generate intermediate points with slight jitter to simulate roads
-            val segments = maxOf(
-                ((haversineDistance(from.latitude, from.longitude, to.latitude, to.longitude) / 500.0).toInt()),
-                3
-            )
-            for (s in 0 until segments) {
-                val fraction = s.toDouble() / segments
-                // Linear interpolation with slight perpendicular offset
-                val lat = from.latitude + (to.latitude - from.latitude) * fraction
-                val lng = from.longitude + (to.longitude - from.longitude) * fraction
-                val jitterLat = sin(fraction * PI * 4) * 0.001
-                val jitterLng = cos(fraction * PI * 4) * 0.001
-                points.add(Pair(lat + jitterLat, lng + jitterLng))
+        _isOptimizing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val originStr = "${waypoints.first().latitude},${waypoints.first().longitude}"
+                val destinationStr = "${waypoints.last().latitude},${waypoints.last().longitude}"
+
+                // Build the Directions API request using the correct fluent API
+                val request = DirectionsApi.newRequest(geoApiContext)
+                    .origin(originStr)
+                    .destination(destinationStr)
+                    .optimizeWaypoints(true)
+
+                // Add middle waypoints (if any) with TSP optimisation
+                if (waypoints.size > 2) {
+                    val middleStrs = waypoints.subList(1, waypoints.size - 1)
+                        .map { wpt -> "${wpt.latitude},${wpt.longitude}" }
+                        .toTypedArray()
+                    request.waypoints(*middleStrs)
+                }
+
+                // Await the blocking API call (on Dispatchers.IO)
+                val result = request.await()
+
+                if (result.routes.isNotEmpty()) {
+                    val route = result.routes.first()
+
+                    // decodePath() returns List<com.google.maps.model.LatLng>
+                    // Map each to com.google.android.gms.maps.model.LatLng for the UI
+                    val apiDecodedPath = route.overviewPolyline.decodePath()
+                    val mappedPath = apiDecodedPath.map { pt ->
+                        LatLng(pt.lat, pt.lng)
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        _routePolylinePoints.value = mappedPath
+
+                        // Reorder middle waypoints per the API's waypointOrder
+                        if (waypoints.size > 2 && route.waypointOrder != null) {
+                            val middle = waypoints.subList(1, waypoints.size - 1)
+                            val reorderedMiddle = route.waypointOrder.map { idx -> middle[idx] }
+                            val newOrder = mutableListOf<AppLocation>()
+                            newOrder.add(waypoints.first())
+                            newOrder.addAll(reorderedMiddle)
+                            newOrder.add(waypoints.last())
+                            _routeWaypoints.value = newOrder
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        fallbackToStraightLines(waypoints)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Directions API call failed", e)
+                withContext(Dispatchers.Main) {
+                    fallbackToStraightLines(waypoints)
+                }
+            } finally {
+                _isOptimizing.value = false
             }
         }
-        // Add the final point exactly
-        val last = waypoints.last()
-        points.add(Pair(last.latitude, last.longitude))
-
-        _routePolylinePoints.value = points
     }
 
-    /** Haversine distance between two coordinates in meters. */
-    private fun haversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val R = 6371000.0 // Earth radius in meters
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val a = sin(dLat / 2).pow(2) + cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
-        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return R * c
+    /**
+     * Fallback: draw straight-line segments between waypoints when the
+     * Directions API request fails or returns no routes.
+     */
+    private fun fallbackToStraightLines(waypoints: List<AppLocation>) {
+        _routePolylinePoints.value = waypoints.map { LatLng(it.latitude, it.longitude) }
     }
 
     // ── Visual Search Mock ─────────────────────────────────────────

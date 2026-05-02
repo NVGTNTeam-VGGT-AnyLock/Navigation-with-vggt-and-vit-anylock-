@@ -51,6 +51,9 @@ android {
          */
         buildConfigField("String", "BACKEND_URL", "\"http://10.0.2.2:8000/\"")
 
+        // Expose Maps API key to Kotlin code via BuildConfig.MAPS_API_KEY
+        buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
+
         // Inject the Maps API key into AndroidManifest.xml via placeholder.
         // The manifest references it as ${MAPS_API_KEY}.
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
@@ -113,6 +116,9 @@ dependencies {
     implementation("androidx.navigation:navigation-ui-ktx:2.7.7")
 
     // ── Google Maps SDK ────────────────────────────────────────────
+    // ── Google Maps Services (Directions API Java Client) ─────────
+    implementation("com.google.maps:google-maps-services:2.2.0")
+
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.maps.android:maps-utils-ktx:5.0.0")
     implementation("com.google.android.gms:play-services-location:21.1.0")
