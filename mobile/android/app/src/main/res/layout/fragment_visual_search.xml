@@ -98,6 +98,7 @@
                 android:theme="@style/ThemeOverlay.Material3.Dark" />
 
             <TextView
+                android:id="@+id/tv_loading_text"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/searching"

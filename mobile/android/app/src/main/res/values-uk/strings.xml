@@ -31,6 +31,8 @@
     <string name="radius_label">Радіус:</string>
     <string name="radius_off">Вимк.</string>
     <string name="match_found">Знайдено збіг!</string>
+    <string name="visual_pin_placed">📍 Візуальний маркер розміщено</string>
+    <string name="visual_pin_title">Результат візуального пошуку</string>
 
     <!-- Map Interactions -->
     <string name="marker_added">📍 Маркер додано (%1$.4f, %2$.4f)</string>
@@ -43,6 +45,12 @@
     <!-- Permissions -->
     <string name="permission_location_denied">Для відображення вашого положення на карті потрібен дозвіл на геолокацію.</string>
     <string name="permission_camera_denied">Для візуального позиціонування потрібен дозвіл на камеру.</string>
+    <string name="permissions_required_title">Необхідні дозволи</string>
+    <string name="permissions_required_message">Для візуального пошуку потрібні дозволи на камеру та геолокацію. Надайте їх у налаштуваннях.</string>
+    <string name="permissions_camera_location_required">Для фотографування та звуження області пошуку потрібні дозволи на камеру та геолокацію.</string>
+    <string name="open_settings">Відкрити налаштування</string>
+    <string name="location_timeout">Час очікування місцезнаходження вичерпано. Пошук по всій базі даних.</string>
+    <string name="geocoder_failed">Не вдалося визначити адресу за вашим місцезнаходженням. Пошук по всій базі даних.</string>
 
     <!-- Info Window Defaults -->
     <string name="marker_title_delivery_point">Точка доставки</string>
@@ -93,14 +101,29 @@
     <string name="capture_photo">Зробити знімок</string>
     <string name="camera_unavailable">Камера недоступна</string>
     <string name="searching">Пошук…</string>
+    <string name="analysing_visual_data">Аналіз візуальних даних…</string>
     <string name="match_found_title">Візуальний збіг</string>
     <string name="match_found_description">Знайдено за допомогою AI пошуку</string>
+    <string name="match_found_description_confidence">Впевненість: %d%%</string>
     <string name="toast_image_captured">Зображення успішно захоплено</string>
     <string name="toast_image_blurry">Зображення надто розмите — спробуйте ще раз</string>
     <string name="toast_camera_error">Помилка камери</string>
     <string name="toast_storage_insufficient">Недостатньо місця у сховищі</string>
     <string name="toast_temp_scans_cleared">Тимчасові файли очищено</string>
     <string name="toast_file_error">Помилка операції з файлом</string>
+
+    <!-- Rough Location Confirmation -->
+    <string name="location_confirm_title">Підтвердьте ваше місцезнаходження</string>
+    <string name="location_confirm_district">Ви зараз у %s?</string>
+    <string name="location_confirm_city">Ви в %s?</string>
+    <string name="location_confirm_country">Ви в %s?</string>
+    <string name="location_confirm_yes">Так</string>
+    <string name="location_confirm_no">Ні</string>
+    <string name="location_confirm_ok">Гаразд</string>
+    <string name="location_fetching">Отримання вашого місцезнаходження…</string>
+    <string name="location_not_available">Не вдалося визначити ваше місцезнаходження. Пошук по всій базі даних.</string>
+    <string name="location_permission_denied_visual">Для звуження області пошуку потрібен дозвіл на геолокацію.</string>
+    <string name="toast_scope_confirmed">Пошук у %s</string>
 
     <!-- Analytics Screen -->
     <string name="analytics_title">Аналітика</string>

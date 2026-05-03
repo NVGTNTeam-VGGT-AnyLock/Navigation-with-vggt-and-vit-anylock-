@@ -31,6 +31,8 @@
     <string name="radius_label">Radius:</string>
     <string name="radius_off">Off</string>
     <string name="match_found">Match Found!</string>
+    <string name="visual_pin_placed">📍 Visual pin placed</string>
+    <string name="visual_pin_title">Visual Locate Result</string>
 
     <!-- Map Interactions -->
     <string name="marker_added">📍 Marker added (%1$.4f, %2$.4f)</string>
@@ -43,6 +45,12 @@
     <!-- Permissions -->
     <string name="permission_location_denied">Location permission is needed to show your position on the map.</string>
     <string name="permission_camera_denied">Camera permission is needed for visual positioning.</string>
+    <string name="permissions_required_title">Permissions Required</string>
+    <string name="permissions_required_message">Camera and Location permissions are required for visual search. Please grant them in Settings.</string>
+    <string name="permissions_camera_location_required">Both Camera and Location permissions are needed to take a photo and narrow down the search area.</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="location_timeout">Location request timed out. Searching entire database.</string>
+    <string name="geocoder_failed">Could not determine your address from location. Searching entire database.</string>
 
     <!-- Info Window Defaults -->
     <string name="marker_title_delivery_point">Delivery Point</string>
@@ -93,14 +101,29 @@
     <string name="capture_photo">Capture Photo</string>
     <string name="camera_unavailable">Camera unavailable</string>
     <string name="searching">Searching…</string>
+    <string name="analysing_visual_data">Analyzing visual data…</string>
     <string name="match_found_title">Visual Match</string>
     <string name="match_found_description">Found via AI visual search</string>
+    <string name="match_found_description_confidence">Confidence: %d%%</string>
     <string name="toast_image_captured">Image captured successfully</string>
     <string name="toast_image_blurry">Image too blurry — please try again</string>
     <string name="toast_camera_error">Camera error occurred</string>
     <string name="toast_storage_insufficient">Not enough storage space</string>
     <string name="toast_temp_scans_cleared">Temporary files cleaned up</string>
     <string name="toast_file_error">File operation error</string>
+
+    <!-- Rough Location Confirmation -->
+    <string name="location_confirm_title">Confirm Your Location</string>
+    <string name="location_confirm_district">Are you currently in %s?</string>
+    <string name="location_confirm_city">Are you in %s?</string>
+    <string name="location_confirm_country">Are you in %s?</string>
+    <string name="location_confirm_yes">Yes</string>
+    <string name="location_confirm_no">No</string>
+    <string name="location_confirm_ok">OK</string>
+    <string name="location_fetching">Fetching your location…</string>
+    <string name="location_not_available">Could not determine your location. Searching entire database.</string>
+    <string name="location_permission_denied_visual">Location permission is needed to narrow down the search area.</string>
+    <string name="toast_scope_confirmed">Searching in %s</string>
 
     <!-- Analytics Screen -->
     <string name="analytics_title">Analytics</string>

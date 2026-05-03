@@ -49,7 +49,7 @@ android {
          * For physical device USB debugging, change to your machine's local IP,
          * e.g., "http://192.168.1.100:8000/"
          */
-        buildConfigField("String", "BACKEND_URL", "\"http://10.0.2.2:8000/\"")
+        buildConfigField("String", "BACKEND_URL", "\"http://192.168.0.205:8000/\"")
 
         // Inject the Maps API key into AndroidManifest.xml via placeholder.
         // The manifest references it as ${MAPS_API_KEY}.
