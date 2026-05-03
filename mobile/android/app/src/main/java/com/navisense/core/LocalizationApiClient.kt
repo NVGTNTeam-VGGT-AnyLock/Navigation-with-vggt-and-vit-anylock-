@@ -5,7 +5,10 @@ import com.navisense.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -77,7 +80,7 @@ class LocalizationApiClient private constructor(
     }
 
     /**
-     * Sends an image file to the backend for localization.
+     * Sends an image file to the backend for localization (DINOv2 endpoint).
      *
      * @param file The JPEG file to upload (must exist in TempScans directory).
      * @return A [PositionResponse] containing the estimated coordinates and confidence.
@@ -143,6 +146,104 @@ class LocalizationApiClient private constructor(
             // Delete the file after final failure
             fileManagerService.deleteImage(file)
             throw lastException ?: IOException("Localization failed after $MAX_RETRIES retries")
+        }
+    }
+
+    /**
+     * Sends an image file plus a location-scope string to the ViT-based
+     * `/api/visual-locate` endpoint for visual place recognition.
+     *
+     * @param file          The JPEG file to upload (must exist in TempScans directory).
+     * @param locationScope A string narrowing the search (e.g. "Kyiv", "Shevchenkivskyi").
+     *                      Pass `null` or empty string for a full-world search.
+     * @return A [VisualLocateResponse] containing the estimated coordinates and confidence.
+     * @throws IOException if the network request fails after all retries.
+     * @throws FileManagerService.FileManagerException if the file cannot be prepared for upload.
+     */
+    suspend fun visualLocate(
+        file: File,
+        locationScope: String?
+    ): VisualLocateResponse = withContext(Dispatchers.IO) {
+        var lastException: IOException? = null
+        var finalResponse: VisualLocateResponse? = null
+
+        for (attempt in 0..MAX_RETRIES) {
+            try {
+                // Prepare multipart image part
+                val imagePart = fileManagerService.prepareImagePart(file)
+
+                // Convert the location_scope string to a RequestBody form part
+                val scopeValue = locationScope ?: ""
+                val scopeBody: RequestBody = scopeValue
+                    .toRequestBody("text/plain".toMediaTypeOrNull())
+
+                // Perform the network request
+                val response: Response<VisualLocateResponse> =
+                    api.visualLocate(imagePart, scopeBody)
+
+                if (!response.isSuccessful) {
+                    val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                    fileManagerService.logError(
+                        "Backend returned HTTP ${response.code()}: $errorBody"
+                    )
+                    // Retry only on server errors (5xx) and not on client errors (4xx)
+                    if (response.code() >= 500 && attempt < MAX_RETRIES) {
+                        val backoffDelay = (
+                                INITIAL_RETRY_DELAY_MS *
+                                        BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                                ).toLong()
+                        delay(backoffDelay)
+                        continue
+                    } else {
+                        when (response.code()) {
+                            404 -> throw IOException("Location not recognized in database")
+                            else -> throw IOException("Backend error ${response.code()}: $errorBody")
+                        }
+                    }
+                }
+
+                val locateResponse = response.body()
+                    ?: throw IOException("Backend returned empty response body")
+
+                // Successful response – delete the temporary file
+                fileManagerService.deleteImage(file)
+                finalResponse = locateResponse
+                break
+
+            } catch (e: SocketTimeoutException) {
+                lastException = e
+                fileManagerService.logError(
+                    "Network timeout on attempt ${attempt + 1}: ${e.message}"
+                )
+                if (attempt == MAX_RETRIES) break
+                val backoffDelay = (
+                        INITIAL_RETRY_DELAY_MS *
+                                BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                        ).toLong()
+                delay(backoffDelay)
+            } catch (e: IOException) {
+                lastException = e
+                fileManagerService.logError(
+                    "Network I/O error on attempt ${attempt + 1}: ${e.message}"
+                )
+                if (attempt == MAX_RETRIES) break
+                val backoffDelay = (
+                        INITIAL_RETRY_DELAY_MS *
+                                BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                        ).toLong()
+                delay(backoffDelay)
+            } catch (e: Exception) {
+                fileManagerService.logError(
+                    "Unexpected error during visual locate: ${e.message}"
+                )
+                throw e
+            }
+        }
+
+        return@withContext finalResponse ?: run {
+            fileManagerService.deleteImage(file)
+            throw lastException
+                ?: IOException("Visual locate failed after $MAX_RETRIES retries")
         }
     }
 }

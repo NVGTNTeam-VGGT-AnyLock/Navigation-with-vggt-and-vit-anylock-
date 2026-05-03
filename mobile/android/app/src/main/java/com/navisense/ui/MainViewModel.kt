@@ -137,6 +137,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _mockMatchLocation = MutableStateFlow<AppLocation?>(null)
     val mockMatchLocation: StateFlow<AppLocation?> = _mockMatchLocation.asStateFlow()
 
+    // ── State: Visual Pin (from ViT backend) ──────────────────────
+    private val _visualPinLocation = MutableStateFlow<AppLocation?>(null)
+    val visualPinLocation: StateFlow<AppLocation?> = _visualPinLocation.asStateFlow()
+
     // ── Analytics (computed) ───────────────────────────────────────
     data class AnalyticsData(
         val categoryCounts: Map<String, Int>,
@@ -396,5 +400,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearMockMatchResult() {
         _mockMatchLocation.value = null
+    }
+
+    // ── Visual Pin (from ViT backend) ───────────────────────────────
+
+    /**
+     * Stores the visual-locate result from the ViT backend.
+     * Called by [VisualSearchFragment] after a successful API call.
+     * The [MapFragment] observes this to render a special "Visual Pin".
+     */
+    fun setVisualPinResult(location: AppLocation) {
+        _visualPinLocation.value = location
+    }
+
+    fun clearVisualPinResult() {
+        _visualPinLocation.value = null
     }
 }

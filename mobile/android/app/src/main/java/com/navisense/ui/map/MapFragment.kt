@@ -2,6 +2,9 @@ package com.navisense.ui.map
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -51,6 +54,9 @@ class MapFragment : Fragment() {
 
     /** Currently visible circle (radius filter). */
     private var radiusCircle: Circle? = null
+
+    /** Reference to the currently displayed "Visual Pin" marker (ViT result). */
+    private var visualPinMarker: Marker? = null
 
     // Track filter button states
     private var visitedFilterActive = false
@@ -378,6 +384,16 @@ class MapFragment : Fragment() {
                         }
                     }
                 }
+
+                // Observe visual pin (from ViT backend) → drop a distinct marker
+                launch {
+                    viewModel.visualPinLocation.collectLatest { pin ->
+                        if (pin != null && isMapReady) {
+                            dropVisualPinMarker(pin)
+                            viewModel.clearVisualPinResult()
+                        }
+                    }
+                }
             }
         }
     }
@@ -395,6 +411,14 @@ class MapFragment : Fragment() {
 
         // Rebuild radius circle if active (cleared by map.clear())
         updateRadiusCircle()
+
+        // Re-add visual pin marker if it was cleared
+        if (visualPinMarker != null) {
+            val pinTag = visualPinMarker?.tag
+            if (pinTag is AppLocation) {
+                visualPinMarker = dropVisualPinMarkerInternal(pinTag)
+            }
+        }
 
         locations.forEach { location ->
             val markerOptions = MarkerOptions()
@@ -438,6 +462,78 @@ class MapFragment : Fragment() {
         )
         map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
         Toast.makeText(requireContext(), R.string.match_found, Toast.LENGTH_SHORT).show()
+    }
+
+    // ── Visual Pin Marker (from ViT backend) ───────────────────────
+
+    /**
+     * Drops a special "Visual Pin" marker at the location returned by the
+     * ViT backend. Uses a distinct CYAN colour and an info window showing
+     * confidence. The camera animates to this marker and zooms in.
+     */
+    private fun dropVisualPinMarker(location: AppLocation) {
+        // Remove any previous visual pin marker
+        visualPinMarker?.remove()
+
+        visualPinMarker = dropVisualPinMarkerInternal(location)
+
+        // Animate camera to the new pin
+        val latLng = LatLng(location.latitude, location.longitude)
+        map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 17f))
+
+        // Show a toast indicating the visual locate result
+        Toast.makeText(
+            requireContext(),
+            getString(R.string.visual_pin_placed),
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    /**
+     * Internal helper that actually creates the marker on the map.
+     * Separated so [renderMarkers] can re-add the pin after a `map.clear()`.
+     */
+    private fun dropVisualPinMarkerInternal(location: AppLocation): Marker {
+        val latLng = LatLng(location.latitude, location.longitude)
+        val marker = map.addMarker(
+            MarkerOptions()
+                .position(latLng)
+                .title(getString(R.string.visual_pin_title))
+                .snippet(location.description)
+                .icon(getVisualPinIcon())
+        ) ?: error("Failed to add visual pin marker")
+        // Store the AppLocation as the marker tag so renderMarkers()
+        // can re-add the pin after map.clear().
+        marker.tag = location
+        return marker
+    }
+
+    /**
+     * Returns a custom BitmapDescriptor for the Visual Pin marker.
+     * Uses a camera/search icon drawable with a distinct hue background.
+     * Falls back to HUE_AZURE if drawable conversion fails.
+     */
+    private fun getVisualPinIcon(): BitmapDescriptor {
+        return try {
+            val drawable: Drawable? = ContextCompat.getDrawable(
+                requireContext(), R.drawable.ic_search_photo
+            )
+            if (drawable != null) {
+                val width = 48
+                val height = 48
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                drawable.setBounds(0, 0, canvas.width, canvas.height)
+                drawable.draw(canvas)
+                BitmapDescriptorFactory.fromBitmap(bitmap)
+            } else {
+                // Fallback: use default marker with a distinct hue
+                BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+            }
+        } catch (e: Exception) {
+            // Fallback on any error
+            BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+        }
     }
 
     override fun onDestroyView() {
