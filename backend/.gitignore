@@ -1,0 +1,51 @@
+# ── Python / ML Environment ──────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.env
+.venv/
+venv/
+env/
+.venv.bak/
+venv.bak/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+torch_compile_cache/
+
+# ── IDE / Editor ───────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# ── OS Files ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Vector Index / FAISS (generated data) ──────────────────────────
+# The vector_index/ directory itself is kept via .gitkeep
+vector_index/*.index
+vector_index/*.meta
+vector_index/*.json
+vector_index/*.faiss
+vector_index/*.pkl
+
+# ── Temp Scans (local CameraX tests) ──────────────────────────────
+TempScans/
+
+# ── Misc ────────────────────────────────────────────────────────────
+*.log
+*.hprof

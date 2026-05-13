@@ -31,6 +31,12 @@ class FeatureExtractor:
     Supports both DINOv2 and ViT architectures via the ``model_type``
     parameter.  Feature extraction always returns an L2-normalised
     768-dimensional vector.
+    
+    GPU optimisations:
+    * Model is cast to FP16 (half precision) when running on CUDA for
+      2× faster inference on Tensor Cores.
+    * Forward pass uses ``@torch.inference_mode()`` (faster than
+      ``torch.no_grad()``).
     """
     
     def __init__(
@@ -54,7 +60,8 @@ class FeatureExtractor:
         self.model_type = model_type
         self.model_name = model_name or MODEL_REGISTRY[model_type]["default_model"]
         self.feature_dim = MODEL_REGISTRY[model_type]["feature_dim"]
-        self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.use_fp16 = False
 
         logger.info(
             f"Loading {model_type} model '{self.model_name}' "
@@ -63,6 +70,13 @@ class FeatureExtractor:
 
         self.processor = AutoImageProcessor.from_pretrained(self.model_name)
         self.model = AutoModel.from_pretrained(self.model_name).to(self.device)
+
+        # ── FP16 half-precision for GPU inference ──────────────────────
+        if self.device.type == "cuda":
+            self.model = self.model.half()
+            self.use_fp16 = True
+            logger.info("Model cast to FP16 (half precision) for GPU inference")
+
         self.model.eval()
 
         # Standard ImageNet normalisation (used by both DINOv2 and ViT)
@@ -73,6 +87,7 @@ class FeatureExtractor:
         ])
         logger.info(f"{model_type} model loaded successfully")
 
+    @torch.inference_mode()
     def extract_features(self, image: Image.Image) -> np.ndarray:
         """
         Extract a 768-dimensional feature vector from an RGB PIL Image.
@@ -83,12 +98,15 @@ class FeatureExtractor:
         Returns:
             numpy array of shape ``(feature_dim,)``, L2-normalised.
         """
-        input_tensor = self.transform(image).unsqueeze(0).to(self.device)
+        # Transform → float32 (CPU).  Cast to FP16 if model is on GPU in half-precision.
+        input_tensor = self.transform(image).unsqueeze(0)
+        if self.use_fp16:
+            input_tensor = input_tensor.half()
+        input_tensor = input_tensor.to(self.device)
 
-        with torch.no_grad():
-            outputs = self.model(input_tensor)
-            # Use the [CLS] token representation (first token)
-            features = outputs.last_hidden_state[:, 0, :].cpu().numpy().squeeze()
+        outputs = self.model(input_tensor)
+        # Use the [CLS] token representation (first token)
+        features = outputs.last_hidden_state[:, 0, :].cpu().numpy().squeeze()
 
         # L2 normalise (critical for cosine / inner-product search)
         norm = np.linalg.norm(features)

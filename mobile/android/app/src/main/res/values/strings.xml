@@ -34,6 +34,10 @@
     <string name="visual_pin_placed">📍 Visual pin placed</string>
     <string name="visual_pin_title">Visual Locate Result</string>
 
+    <!-- Navigation Mode Toggle -->
+    <string name="mode_scanner">🔍 Scanner</string>
+    <string name="mode_dashcam">🎥 Dashcam</string>
+
     <!-- Map Interactions -->
     <string name="marker_added">📍 Marker added (%1$.4f, %2$.4f)</string>
     <string name="marker_removed">🗑️ Marker removed</string>
@@ -128,11 +132,23 @@
 
     <!-- Analytics Screen -->
     <string name="analytics_title">Analytics</string>
+    <string name="analytics_summary">Performance Summary</string>
+    <string name="total_distance">Total Distance</string>
+    <string name="time_saved">Time Saved</string>
+    <string name="gps_stability">GPS Stability</string>
+    <string name="gps_stability_score">%d%%</string>
+    <string name="total_points">Total Points</string>
     <string name="category_distribution">Category Distribution</string>
-    <string name="status_histogram">Visited vs Favorites</string>
+    <string name="efficiency_metrics">Efficiency Metrics</string>
+    <string name="efficiency_subtitle">Visited vs Not Visited ratio</string>
+    <string name="efficiency_visited">Visited</string>
+    <string name="efficiency_not_visited">Not Visited</string>
+    <string name="efficiency_favorites">Favorites</string>
     <string name="district_analysis">District Analysis</string>
     <string name="visited_stats">Visited vs Not Visited</string>
     <string name="total_locations">Total Locations</string>
+    <string name="km_unit">km</string>
+    <string name="min_unit">min</string>
 
     <!-- Toast Messages -->
     <string name="toast_no_internet">No internet connection. Please check your network.</string>

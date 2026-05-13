@@ -24,7 +24,7 @@ import androidx.room.RoomDatabase
  */
 @Database(
     entities = [DeliveryHistory::class, SavedLocation::class],
-    version = 2,
+    version = 3,
     exportSchema = false    // Schema export disabled for MVP
 )
 abstract class AppDatabase : RoomDatabase() {

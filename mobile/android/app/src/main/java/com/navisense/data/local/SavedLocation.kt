@@ -16,6 +16,9 @@ import androidx.room.PrimaryKey
  * @property category    Category string matching [com.navisense.model.AppLocationCategory] keys.
  * @property latitude    WGS‑84 latitude.
  * @property longitude   WGS‑84 longitude.
+ * @property imageUri    URI string of an attached photo (local content URI or empty).
+ * @property isVisited   Whether the user has visited this location.
+ * @property isFavorite  Whether the user has marked this location as a favorite (heart).
  * @property timestamp   Epoch millis when this record was created (default: now).
  */
 @Entity(tableName = "saved_locations")
@@ -27,5 +30,8 @@ data class SavedLocation(
     val category: String,
     val latitude: Double,
     val longitude: Double,
+    val imageUri: String = "",
+    val isVisited: Boolean = false,
+    val isFavorite: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )

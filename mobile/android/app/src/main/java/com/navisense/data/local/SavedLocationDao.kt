@@ -68,4 +68,18 @@ interface SavedLocationDao {
      */
     @Query("SELECT * FROM saved_locations WHERE id = :id")
     suspend fun getById(id: Long): SavedLocation?
+
+    /**
+     * Toggle the [SavedLocation.isVisited] flag for the record with the given [id].
+     * Uses a SQL `NOT` expression so the toggle is atomic at the database level.
+     */
+    @Query("UPDATE saved_locations SET isVisited = NOT isVisited WHERE id = :id")
+    suspend fun toggleVisited(id: Long)
+
+    /**
+     * Toggle the [SavedLocation.isFavorite] flag for the record with the given [id].
+     * Uses a SQL `NOT` expression so the toggle is atomic at the database level.
+     */
+    @Query("UPDATE saved_locations SET isFavorite = NOT isFavorite WHERE id = :id")
+    suspend fun toggleFavorite(id: Long)
 }

@@ -31,6 +31,8 @@ import com.navisense.R
 import com.navisense.databinding.FragmentMapBinding
 import com.navisense.model.AppLocation
 import com.navisense.model.AppLocationCategory
+import com.navisense.model.LocationState
+import com.navisense.model.NavMode
 import com.navisense.ui.MainViewModel
 import com.navisense.ui.details.LocationDetailsBottomSheet
 import kotlinx.coroutines.flow.collectLatest
@@ -88,9 +90,8 @@ class MapFragment : Fragment() {
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity())
 
-        // After locale switch (Activity recreation), re-resolve mock data strings
-        // so seed location titles/descriptions reflect the new language.
-        viewModel.refreshLocalizedData()
+        // Locations are now persisted in Room SQLite and always reflect the
+        // user's saved data — no seed-data re-resolution needed after locale switch.
 
         initMapFragment()
         initSearchBar()
@@ -99,6 +100,7 @@ class MapFragment : Fragment() {
         initRadiusFilter()
         initFabMyLocation()
         initLanguageToggle()
+        initModeToggle()
         observeViewModel()
     }
 
@@ -316,6 +318,36 @@ class MapFragment : Fragment() {
         binding.btnLanguageToggle.text = if (currentLocale.language == "en") "EN" else "UK"
     }
 
+    // ── Mode Toggle (Scanner / Dashcam) ──────────────────────────
+
+    /** Guard to prevent [switchNavMode] listener from reacting to programmatic changes. */
+    private var isModeToggleInitialised = false
+
+    private fun initModeToggle() {
+        // Set initial state without triggering listener
+        updateModeToggleText(viewModel.navMode.value)
+        isModeToggleInitialised = true
+
+        binding.switchNavMode.setOnCheckedChangeListener { _, isChecked ->
+            if (!isModeToggleInitialised) return@setOnCheckedChangeListener
+            // Only toggle if the actual mode doesn't match the switch state
+            val currentMode = viewModel.navMode.value
+            val shouldBeDashcam = isChecked
+            if ((currentMode == NavMode.DASHCAM) != shouldBeDashcam) {
+                viewModel.toggleNavMode()
+            }
+            // The navMode observer will sync the text/checked state
+        }
+    }
+
+    private fun updateModeToggleText(mode: NavMode) {
+        binding.switchNavMode.text = when (mode) {
+            NavMode.SCANNER -> getString(R.string.mode_scanner)
+            NavMode.DASHCAM -> getString(R.string.mode_dashcam)
+        }
+        binding.switchNavMode.isChecked = mode == NavMode.DASHCAM
+    }
+
     // ── My Location FAB ────────────────────────────────────────────
 
     private fun initFabMyLocation() {
@@ -392,6 +424,24 @@ class MapFragment : Fragment() {
                             dropVisualPinMarker(pin)
                             viewModel.clearVisualPinResult()
                         }
+                    }
+                }
+
+                // Observe navigation mode toggle → update switch text
+                launch {
+                    viewModel.navMode.collectLatest { mode ->
+                        updateModeToggleText(mode)
+                        // In Dashcam mode the visual pin should look FRESH
+                        if (mode == NavMode.DASHCAM) {
+                            updateVisualPinAppearance(LocationState.FRESH)
+                        }
+                    }
+                }
+
+                // Observe location state (freshness) → update visual pin appearance
+                launch {
+                    viewModel.locationState.collectLatest { state ->
+                        updateVisualPinAppearance(state)
                     }
                 }
             }
@@ -491,16 +541,19 @@ class MapFragment : Fragment() {
 
     /**
      * Internal helper that actually creates the marker on the map.
+     * The icon is styled according to the current [LocationState].
      * Separated so [renderMarkers] can re-add the pin after a `map.clear()`.
      */
     private fun dropVisualPinMarkerInternal(location: AppLocation): Marker {
         val latLng = LatLng(location.latitude, location.longitude)
+        val currentState = viewModel.locationState.value
         val marker = map.addMarker(
             MarkerOptions()
                 .position(latLng)
                 .title(getString(R.string.visual_pin_title))
                 .snippet(location.description)
-                .icon(getVisualPinIcon())
+                .icon(getLocationStateIcon(currentState))
+                .alpha(getLocationStateAlpha(currentState))
         ) ?: error("Failed to add visual pin marker")
         // Store the AppLocation as the marker tag so renderMarkers()
         // can re-add the pin after map.clear().
@@ -509,11 +562,39 @@ class MapFragment : Fragment() {
     }
 
     /**
-     * Returns a custom BitmapDescriptor for the Visual Pin marker.
-     * Uses a camera/search icon drawable with a distinct hue background.
-     * Falls back to HUE_AZURE if drawable conversion fails.
+     * Updates the appearance of the existing visual pin marker to reflect
+     * the given [LocationState] without re-creating it.
      */
-    private fun getVisualPinIcon(): BitmapDescriptor {
+    private fun updateVisualPinAppearance(state: LocationState) {
+        val marker = visualPinMarker ?: return
+        marker.setIcon(getLocationStateIcon(state))
+        marker.alpha = getLocationStateAlpha(state)
+    }
+
+    /**
+     * Returns the marker alpha (opacity) for the given [LocationState].
+     * - [LocationState.FRESH]      → 1.0 (fully opaque)
+     * - [LocationState.DEGRADING]  → 0.5 (semi-transparent)
+     * - [LocationState.STALE]      → 0.3 (very transparent)
+     */
+    private fun getLocationStateAlpha(state: LocationState): Float {
+        return when (state) {
+            LocationState.FRESH -> 1.0f
+            LocationState.DEGRADING -> 0.5f
+            LocationState.STALE -> 0.3f
+        }
+    }
+
+    /**
+     * Returns a [BitmapDescriptor] for the visual pin marker based on the
+     * given [LocationState].
+     *
+     * - [LocationState.FRESH]      → Solid GREEN (default primary-like hue)
+     * - [LocationState.DEGRADING]  → Greyish-azure tint (semi-transparent feel)
+     * - [LocationState.STALE]      → HUE_ROSE with a "?" from ic_search or falls
+     *                                back to a rose marker indicating uncertainty.
+     */
+    private fun getLocationStateIcon(state: LocationState): BitmapDescriptor {
         return try {
             val drawable: Drawable? = ContextCompat.getDrawable(
                 requireContext(), R.drawable.ic_search_photo
@@ -527,13 +608,31 @@ class MapFragment : Fragment() {
                 drawable.draw(canvas)
                 BitmapDescriptorFactory.fromBitmap(bitmap)
             } else {
-                // Fallback: use default marker with a distinct hue
-                BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                // Fallback to default marker with state-based hue
+                val hue = when (state) {
+                    LocationState.FRESH -> BitmapDescriptorFactory.HUE_GREEN
+                    LocationState.DEGRADING -> BitmapDescriptorFactory.HUE_CYAN
+                    LocationState.STALE -> BitmapDescriptorFactory.HUE_ROSE
+                }
+                BitmapDescriptorFactory.defaultMarker(hue)
             }
         } catch (e: Exception) {
-            // Fallback on any error
-            BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+            val hue = when (state) {
+                LocationState.FRESH -> BitmapDescriptorFactory.HUE_GREEN
+                LocationState.DEGRADING -> BitmapDescriptorFactory.HUE_CYAN
+                LocationState.STALE -> BitmapDescriptorFactory.HUE_ROSE
+            }
+            BitmapDescriptorFactory.defaultMarker(hue)
         }
+    }
+
+    /**
+     * Returns a custom BitmapDescriptor for the Visual Pin marker (legacy).
+     * Uses a camera/search icon drawable with a distinct hue background.
+     * Falls back to HUE_AZURE if drawable conversion fails.
+     */
+    private fun getVisualPinIcon(): BitmapDescriptor {
+        return getLocationStateIcon(viewModel.locationState.value)
     }
 
     override fun onDestroyView() {

@@ -34,6 +34,10 @@
     <string name="visual_pin_placed">📍 Візуальний маркер розміщено</string>
     <string name="visual_pin_title">Результат візуального пошуку</string>
 
+    <!-- Navigation Mode Toggle -->
+    <string name="mode_scanner">🔍 Сканер</string>
+    <string name="mode_dashcam">🎥 Відеореєстратор</string>
+
     <!-- Map Interactions -->
     <string name="marker_added">📍 Маркер додано (%1$.4f, %2$.4f)</string>
     <string name="marker_removed">🗑️ Маркер видалено</string>
@@ -128,7 +132,16 @@
 
     <!-- Analytics Screen -->
     <string name="analytics_title">Аналітика</string>
+    <string name="analytics_summary">Зведення продуктивності</string>
     <string name="category_distribution">Розподіл за категоріями</string>
+    <string name="total_distance">Загальна відстань</string>
+    <string name="time_saved">Збережений час</string>
+    <string name="gps_stability">Стабільність GPS</string>
+    <string name="efficiency_metrics">Метрики ефективності</string>
+    <string name="efficiency_subtitle">Відвідано vs Не відвідано</string>
+    <string name="efficiency_visited">Відвідано</string>
+    <string name="efficiency_not_visited">Не відвідано</string>
+    <string name="efficiency_favorites">Обране</string>
     <string name="status_histogram">Відвідані vs Обране</string>
     <string name="district_analysis">Аналіз за районами</string>
     <string name="visited_stats">Відвідано vs Не відвідано</string>

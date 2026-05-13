@@ -10,25 +10,32 @@ import com.google.maps.GeoApiContext
 import com.google.maps.android.PolyUtil
 import com.navisense.BuildConfig
 import com.navisense.data.LocationRepository
-import com.navisense.data.MockLocationRepositoryImpl
+import com.navisense.data.RoomLocationRepositoryImpl
+import com.navisense.data.local.AppDatabase
 import com.navisense.model.AppLocation
 import com.navisense.model.AppLocationCategory
+import com.navisense.model.LocationState
+import com.navisense.model.NavMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.pow
 
 /**
  * Shared ViewModel for the entire Location Management App.
  *
- * Uses [LocationRepository] for all data access. Currently backed by
- * [MockLocationRepositoryImpl]; Anya will swap this for a Room-based
- * implementation without changing any ViewModel code.
+ * Uses [LocationRepository] for all data access. Backed by
+ * [RoomLocationRepositoryImpl] which persists all location data in a Room
+ * SQLite database — local-first architecture with no hardcoded seed data.
  *
  * Exposes:
  * - [allLocations] — unfiltered list from the repository
@@ -54,8 +61,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── Repository (swap here when Room is ready) ──────────────────
-    private val repository = MockLocationRepositoryImpl(application)
+    // ── Database ────────────────────────────────────────────────────
+    private val db = AppDatabase.getInstance(application)
+
+    // ── Repository (Room-backed, local-first) ───────────────────────
+    private val repository: LocationRepository = RoomLocationRepositoryImpl(
+        savedLocationDao = db.savedLocationDao(),
+        deliveryHistoryDao = db.deliveryHistoryDao(),
+        scope = viewModelScope
+    )
 
     // ── State: All Locations ───────────────────────────────────────
     val allLocations: StateFlow<List<AppLocation>> = repository.getAllLocations()
@@ -137,6 +151,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _mockMatchLocation = MutableStateFlow<AppLocation?>(null)
     val mockMatchLocation: StateFlow<AppLocation?> = _mockMatchLocation.asStateFlow()
 
+    // ── State: Navigation Mode ────────────────────────────────────
+    private val _navMode = MutableStateFlow(NavMode.SCANNER)
+    val navMode: StateFlow<NavMode> = _navMode.asStateFlow()
+
+    // ── State: Location Freshness (Scanner mode only) ────────────
+    private val _locationState = MutableStateFlow(LocationState.FRESH)
+    val locationState: StateFlow<LocationState> = _locationState.asStateFlow()
+
+    /** Timestamp (System.currentTimeMillis()) when the last visual pin was placed. */
+    private var lastLocationTimestampMs: Long = 0L
+
     // ── State: Visual Pin (from ViT backend) ──────────────────────
     private val _visualPinLocation = MutableStateFlow<AppLocation?>(null)
     val visualPinLocation: StateFlow<AppLocation?> = _visualPinLocation.asStateFlow()
@@ -171,6 +196,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000),
             AnalyticsData(emptyMap(), 0, 0, 0, 0, emptyMap(), 0))
 
+    // ── Delivery History Summary (for KPI cards) ────────────────────
+
+    /**
+     * Aggregated delivery statistics derived from the Room [DeliveryHistory] database.
+     *
+     * @property totalDistanceKm   Summed Haversine distance of all completed deliveries.
+     * @property timeSavedMin      Total estimated time saved (from delivery_history).
+     * @property gpsStabilityScore 0–100 score: 100 = no GPS drops across all trips.
+     */
+    data class DeliverySummary(
+        val totalDistanceKm: Double,
+        val timeSavedMin: Long,
+        val gpsStabilityScore: Int
+    )
+
+    /**
+     * Reactive StateFlow that re-computes the delivery summary whenever the
+     * [DeliveryHistoryDao.getAllDeliveries] Flow emits new data.
+     */
+    val deliverySummary: StateFlow<DeliverySummary> =
+        deliveryHistoryDao.getAllDeliveries().map { deliveries ->
+            if (deliveries.isEmpty()) {
+                DeliverySummary(0.0, 0L, 100)
+            } else {
+                // Compute total distance using Haversine approximation
+                val totalMeters = deliveries.sumOf { delivery ->
+                    haversineMeters(
+                        delivery.startPointLat, delivery.startPointLng,
+                        delivery.endPointLat, delivery.endPointLng
+                    )
+                }
+                val totalDistanceKm = totalMeters / 1000.0
+                val totalTimeSavedSec = deliveries.sumOf { it.timeSavedSeconds }
+                val totalTimeSavedMin = totalTimeSavedSec / 60
+
+                // GPS Stability: 100 - (totalDrops / totalDeliveries) * 20, clamped to 0..100
+                val totalDrops = deliveries.sumOf { it.gpsDropsCount }
+                val rawScore = 100 - ((totalDrops.toDouble() / deliveries.size) * 20)
+                val gpsScore = rawScore.coerceIn(0.0, 100.0).toInt()
+
+                DeliverySummary(totalDistanceKm, totalTimeSavedMin, gpsScore)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000),
+            DeliverySummary(0.0, 0L, 100))
+
+    /**
+     * Approximate Haversine distance between two WGS‑84 coordinates.
+     * @return Distance in meters.
+     */
+    private fun haversineMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+        val R = 6_371_000.0 // Earth radius in meters
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLng = Math.toRadians(lng2 - lng1)
+        val a = (Math.sin(dLat / 2)).pow(2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                (Math.sin(dLng / 2)).pow(2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return R * c
+    }
+
     /**
      * Mock district detection based on geographic bounds of Kyiv.
      * Maps a coordinate to one of Kyiv's districts.
@@ -194,17 +279,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Desnyanskyi (north-east, left bank)
             else -> "Desnyanskyi"
         }
-    }
-
-    // ── Localization ──────────────────────────────────────────────
-
-    /**
-     * Re-resolve all seed location strings from the current locale.
-     * Call this after the application locale changes (e.g. from
-     * [com.navisense.ui.map.MapFragment]'s language toggle).
-     */
-    fun refreshLocalizedData() {
-        repository.refreshLocalizedData()
     }
 
     // ── Public API ─────────────────────────────────────────────────
@@ -402,18 +476,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _mockMatchLocation.value = null
     }
 
+    // ── Navigation Mode ─────────────────────────────────────────────
+
+    /** Toggle between Scanner (on-demand) and Dashcam (continuous/live) modes. */
+    fun toggleNavMode() {
+        _navMode.value = when (_navMode.value) {
+            NavMode.SCANNER -> {
+                // Switch to Dashcam → state is always FRESH
+                _locationState.value = LocationState.FRESH
+                NavMode.DASHCAM
+            }
+            NavMode.DASHCAM -> {
+                NavMode.SCANNER
+            }
+        }
+    }
+
     // ── Visual Pin (from ViT backend) ───────────────────────────────
 
     /**
      * Stores the visual-locate result from the ViT backend.
      * Called by [VisualSearchFragment] after a successful API call.
      * The [MapFragment] observes this to render a special "Visual Pin".
+     *
+     * In [NavMode.SCANNER] the location timestamp is recorded and an
+     * age-checking coroutine is launched to track freshness.
      */
     fun setVisualPinResult(location: AppLocation) {
         _visualPinLocation.value = location
+
+        // Record timestamp and start age tracking in Scanner mode
+        if (_navMode.value == NavMode.SCANNER) {
+            lastLocationTimestampMs = System.currentTimeMillis()
+            _locationState.value = LocationState.FRESH
+            startLocationAgeChecker()
+        } else {
+            // Dashcam mode → always fresh
+            _locationState.value = LocationState.FRESH
+        }
     }
 
     fun clearVisualPinResult() {
         _visualPinLocation.value = null
+        _locationState.value = LocationState.FRESH
+    }
+
+    // ── Location Age Checker (Scanner mode) ─────────────────────────
+
+    /**
+     * Launches a coroutine that periodically checks the age of the last
+     * visual-pin location and updates [_locationState] accordingly.
+     *
+     * Thresholds:
+     * - 0 … 30 seconds   → [LocationState.FRESH]
+     * - 31 … 120 seconds → [LocationState.DEGRADING]
+     * - > 120 seconds    → [LocationState.STALE]
+     *
+     * The loop exits when a new location is set (a new coroutine replaces it),
+     * when the mode switches to [NavMode.DASHCAM], or when the pin is cleared.
+     */
+    private fun startLocationAgeChecker() {
+        viewModelScope.launch {
+            while (isActive) {
+                delay(5_000) // Check every 5 seconds
+
+                // Stop if mode switched to Dashcam or pin cleared
+                if (_navMode.value != NavMode.SCANNER || _visualPinLocation.value == null) {
+                    if (_navMode.value != NavMode.SCANNER) {
+                        _locationState.value = LocationState.FRESH
+                    }
+                    break
+                }
+
+                val ageSeconds = (System.currentTimeMillis() - lastLocationTimestampMs) / 1000
+                _locationState.value = when {
+                    ageSeconds <= 30 -> LocationState.FRESH
+                    ageSeconds <= 120 -> LocationState.DEGRADING
+                    else -> LocationState.STALE
+                }
+            }
+        }
     }
 }

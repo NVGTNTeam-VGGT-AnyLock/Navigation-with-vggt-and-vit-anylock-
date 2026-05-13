@@ -1,8 +1,8 @@
-fastapi 
-uvicorn[standard] 
-torch 
+fastapi
+uvicorn[standard]
+torch                  # Install CUDA variant manually for GPU: pip install torch==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
 transformers
-faiss-cpu
+faiss-cpu              # faiss>=1.8 includes GPU support when CUDA is available; faiss-gpu is discontinued
 pillow
 numpy
 python-multipart
@@ -12,4 +12,4 @@ scipy
 httpx
 pytest
 pytest-asyncio
-torchvision
+torchvision            # Install CUDA variant manually for GPU (see torch above)

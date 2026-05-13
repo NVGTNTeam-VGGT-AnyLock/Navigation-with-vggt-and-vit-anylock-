@@ -15,8 +15,44 @@ _DEFAULT_INDEX_PREFIX = str(_DEFAULT_INDEX_DIR / "faiss_index")
 _DEFAULT_SCOPES_FILE = _DEFAULT_INDEX_DIR / "faiss_scopes.json"
 
 
+# ── FAISS GPU helpers ─────────────────────────────────────────────────
+def _is_cuda_available() -> bool:
+    """Check whether FAISS can access at least one CUDA device."""
+    try:
+        return faiss.get_num_gpus() > 0
+    except Exception:
+        return False
+
+
+def _move_index_to_gpu(index: faiss.Index, gpu_id: int = 0) -> faiss.Index:
+    """Move a CPU FAISS index to the specified GPU device.
+
+    Returns the original (CPU) index if GPU transfer fails.
+    """
+    if not _is_cuda_available():
+        return index
+    try:
+        res = faiss.StandardGpuResources()
+        # Use float16 when supported for 2× memory reduction on Tensor Cores
+        co = faiss.GpuClonerOptions()
+        co.useFloat16 = True
+        gpu_index = faiss.index_cpu_to_gpu(res, gpu_id, index, co)
+        logger.info("FAISS index moved to GPU (device %d) with FP16", gpu_id)
+        return gpu_index
+    except Exception as exc:
+        logger.warning("Failed to move FAISS index to GPU: %s. Using CPU.", exc)
+        return index
+
+
 class VectorDatabase:
-    """FAISS‑based vector database for landmark feature vectors."""
+    """FAISS‑based vector database for landmark feature vectors.
+
+    GPU acceleration:
+        When a CUDA device is available the internal FAISS index is
+        automatically moved to GPU with FP16 storage.  The index is
+        transparently converted back to CPU before serialisation so that
+        saved indexes remain portable.
+    """
     
     def __init__(self, dimension: int = 768, index_type: str = "flat_l2"):
         """
@@ -32,18 +68,28 @@ class VectorDatabase:
         self.landmark_ids: List[str] = []
         self.landmark_metadata: Dict[str, Tuple[float, float, int]] = {}
         self.landmark_scopes: Dict[str, str] = {}  # landmark_id → location_scope
+        self._gpu_res: Optional[faiss.StandardGpuResources] = None
+        self._on_gpu: bool = False
 
         if index_type == "flat_l2":
-            self.index = faiss.IndexFlatL2(dimension)
+            cpu_index = faiss.IndexFlatL2(dimension)
         elif index_type == "ivf_flat":
             nlist = 100
             quantizer = faiss.IndexFlatL2(dimension)
-            self.index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_L2)
-            self.index.nprobe = 10
+            cpu_index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_L2)
+            cpu_index.nprobe = 10
         else:
             raise ValueError(f"Unsupported index type: {index_type}")
         
-        logger.info(f"FAISS index created: {index_type}, dimension {dimension}")
+        # ── Move index to GPU if available ─────────────────────────────
+        self.index = _move_index_to_gpu(cpu_index)
+        self._on_gpu = self.index is not cpu_index
+
+        logger.info(
+            "FAISS index created: %s, dimension %d [%s]",
+            index_type, dimension,
+            "GPU" if self._on_gpu else "CPU",
+        )
     
     # ── Index population ──────────────────────────────────────────────
     
@@ -168,8 +214,17 @@ class VectorDatabase:
     # ── Persistence ───────────────────────────────────────────────────
     
     def save(self, filepath: str):
-        """Save the index and associated metadata to disk."""
-        faiss.write_index(self.index, filepath + ".index")
+        """Save the index and associated metadata to disk.
+
+        If the index is on GPU it is transparently converted back to CPU
+        before serialisation so that saved indexes remain portable.
+        """
+        index_to_write = self.index
+        if self._on_gpu:
+            index_to_write = faiss.index_gpu_to_cpu(self.index)
+            logger.debug("Converted GPU index to CPU for serialisation")
+
+        faiss.write_index(index_to_write, filepath + ".index")
         with open(filepath + ".meta", "wb") as f:
             pickle.dump({
                 "dimension": self.dimension,
@@ -181,11 +236,20 @@ class VectorDatabase:
         logger.info(f"Vector database saved to {filepath}.index/.meta")
     
     def load(self, filepath: str):
-        """Load index and metadata from disk."""
+        """Load index and metadata from disk.
+
+        After loading from disk the index is automatically moved to GPU
+        if a CUDA device is available.
+        """
         if not os.path.exists(filepath + ".index"):
             raise FileNotFoundError(f"Index file {filepath}.index not found")
         
-        self.index = faiss.read_index(filepath + ".index")
+        cpu_index = faiss.read_index(filepath + ".index")
+        
+        # ── Move to GPU if available ──────────────────────────────────
+        self.index = _move_index_to_gpu(cpu_index)
+        self._on_gpu = self.index is not cpu_index
+
         with open(filepath + ".meta", "rb") as f:
             data = pickle.load(f)
             self.dimension = data["dimension"]
@@ -204,7 +268,8 @@ class VectorDatabase:
         
         logger.info(
             f"Vector database loaded from {filepath}.index/.meta "
-            f"(size {self.index.ntotal}, {len(self.landmark_scopes)} scopes)"
+            f"(size {self.index.ntotal}, {len(self.landmark_scopes)} scopes) "
+            f"[{'GPU' if self._on_gpu else 'CPU'}]"
         )
     
     # ── Demo index ────────────────────────────────────────────────────
@@ -238,20 +303,20 @@ _vector_db: Optional[VectorDatabase] = None
 
 def get_vector_db(
     index_prefix: Optional[str] = None,
-    fallback_to_demo: bool = True,
+    fallback_to_demo: bool = False,
 ) -> VectorDatabase:
     """
     Singleton getter for the vector database.
     
     Loading priority:
     1. Pre-built index at *index_prefix* (set by :mod:`app.init_vector_db`).
-    2. If not found and *fallback_to_demo* is ``True``, creates a random demo.
+    2. If not found and *fallback_to_demo* is ``True`` (legacy), creates a random demo.
     
     Args:
         index_prefix: path prefix (without ``.index``) to load from.
             Defaults to :const:`_DEFAULT_INDEX_PREFIX`.
-        fallback_to_demo: if ``True``, create a demo index when no pre-built
-            index exists.
+        fallback_to_demo: deprecated — kept only for backwards compatibility.
+            When ``True``, creates a random demo index if no pre-built index exists.
     """
     global _vector_db
     if _vector_db is not None:
@@ -265,7 +330,7 @@ def get_vector_db(
         _vector_db.load(prefix)
         return _vector_db
 
-    # Fallback to demo
+    # Legacy fallback to random demo (disabled by default)
     if fallback_to_demo:
         logger.warning(
             f"Pre-built index not found at {prefix}.index. "
@@ -279,14 +344,22 @@ def get_vector_db(
         _vector_db.create_demo_index(1000)
         return _vector_db
 
-    raise FileNotFoundError(
-        f"Index file {prefix}.index not found and fallback_to_demo=False"
+    # No real index available — start empty and warn
+    logger.warning(
+        f"Pre-built index not found at {prefix}.index. "
+        "Starting with an EMPTY index — only real reference data will be used."
     )
+    logger.warning(
+        "Run `python -m app.init_vector_db` to build a real index "
+        "from reference images."
+    )
+    _vector_db = VectorDatabase(dimension=768, index_type="flat_l2")
+    return _vector_db
 
 
 def get_vit_vector_db(
     index_prefix: Optional[str] = None,
-    fallback_to_demo: bool = True,
+    fallback_to_demo: bool = False,
 ) -> VectorDatabase:
     """
     Singleton getter for the **ViT-based** vector database.
@@ -294,6 +367,10 @@ def get_vit_vector_db(
     Separate singleton from :func:`get_vector_db` so the DINOv2-based
     index (used by ``/api/v1/position``) and the ViT-based index (used by
     ``/api/visual-locate``) can coexist.
+    
+    .. important::
+       No mock/demo data is ever generated unless ``fallback_to_demo=True``
+       is explicitly passed (legacy behaviour).
     """
     global _vector_db  # reuse same global but with separate loading
     # We use a module-level flag to distinguish
@@ -312,7 +389,15 @@ def get_vit_vector_db(
             db.create_demo_index(1000)
             get_vit_vector_db._vit_db = db
         else:
-            raise FileNotFoundError(
-                f"Index file {prefix}.index not found and fallback_to_demo=False"
+            # No real index available — start empty and warn
+            logger.warning(
+                f"Pre-built index not found at {prefix}.index. "
+                "Starting with an EMPTY index — only real reference data will be used."
             )
+            logger.warning(
+                "Run `python -m app.init_vector_db` to build a real index "
+                "from reference images."
+            )
+            db = VectorDatabase(dimension=768, index_type="flat_l2")
+            get_vit_vector_db._vit_db = db
     return get_vit_vector_db._vit_db
