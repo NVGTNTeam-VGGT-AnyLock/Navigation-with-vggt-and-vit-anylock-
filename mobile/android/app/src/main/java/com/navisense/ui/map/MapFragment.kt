@@ -60,6 +60,16 @@ class MapFragment : Fragment() {
     /** Reference to the currently displayed "Visual Pin" marker (ViT result). */
     private var visualPinMarker: Marker? = null
 
+    /**
+     * Polyline rendered for the burst-capture trajectory (5-point path from
+     * [MainViewModel.routePolylinePoints]).  Removed and re-added whenever
+     * the trajectory changes.
+     */
+    private var burstPolyline: Polyline? = null
+
+    /** Yellow marker at the end of the burst trajectory with heading rotation. */
+    private var burstDirectionMarker: Marker? = null
+
     // Track filter button states
     private var visitedFilterActive = false
     private var favoritesFilterActive = false
@@ -427,6 +437,15 @@ class MapFragment : Fragment() {
                     }
                 }
 
+                // Observe burst-capture trajectory polyline → draw on map
+                launch {
+                    viewModel.routePolylinePoints.collectLatest { points ->
+                        if (isMapReady) {
+                            drawBurstTrajectory(points)
+                        }
+                    }
+                }
+
                 // Observe navigation mode toggle → update switch text
                 launch {
                     viewModel.navMode.collectLatest { mode ->
@@ -499,19 +518,111 @@ class MapFragment : Fragment() {
     }
 
     /**
-     * Drops a mock "Match Found" marker (from Visual Search) and animates camera to it.
+     * Drops a mock "Match Found" marker.
+     *
+     * If [MainViewModel.routePolylinePoints] contains data (burst‑capture
+     * trajectory), the marker is placed at the **final** trajectory point
+     * with its [MarkerOptions.rotation] set to the heading extracted from
+     * [AppLocation.description], and the camera animates to the bounding
+     * box of the full 5‑point path.
+     *
+     * Otherwise falls back to the standard single‑point marker with a
+     * zoom‑in animation.
      */
     private fun dropMockMatchMarker(location: AppLocation) {
-        val latLng = LatLng(location.latitude, location.longitude)
-        map.addMarker(
-            MarkerOptions()
-                .position(latLng)
-                .title(getString(R.string.match_found))
-                .snippet(location.title)
-                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_YELLOW))
-        )
-        map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+        val trajectory = viewModel.routePolylinePoints.value
+
+        if (trajectory.isNotEmpty()) {
+            // ── Burst‑capture mode: directional marker at last point ──
+            val lastPoint = trajectory.last()
+            val headingDeg = extractHeading(location.description)
+
+            // Remove previous burst marker if any
+            burstDirectionMarker?.remove()
+
+            burstDirectionMarker = map.addMarker(
+                MarkerOptions()
+                    .position(lastPoint)
+                    .title(getString(R.string.match_found))
+                    .snippet(location.title)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_YELLOW))
+                    .rotation(headingDeg.toFloat())
+                    .anchor(0.5f, 0.5f)   // centre the marker for accurate rotation
+                    .flat(true)            // rotate with the map (compass-aware)
+            )
+
+            // Animate camera to the bounding box of the whole trajectory
+            animateToBurstBounds(trajectory)
+        } else {
+            // ── Standard mock‑match mode (single point) ──────────────
+            val latLng = LatLng(location.latitude, location.longitude)
+            map.addMarker(
+                MarkerOptions()
+                    .position(latLng)
+                    .title(getString(R.string.match_found))
+                    .snippet(location.title)
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_YELLOW))
+            )
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 16f))
+        }
+
         Toast.makeText(requireContext(), R.string.match_found, Toast.LENGTH_SHORT).show()
+    }
+
+    // ── Burst‑capture trajectory helpers ─────────────────────────────
+
+    /**
+     * Draws (or updates) a [Polyline] connecting the 5‑point burst‑capture
+     * trajectory.  Styled with colour `#1565C0`, 6dp width and rounded
+     * joint caps.
+     *
+     * If [points] is empty the polyline is removed from the map.
+     */
+    private fun drawBurstTrajectory(points: List<LatLng>) {
+        // Remove previous polyline
+        burstPolyline?.remove()
+        burstPolyline = null
+
+        if (points.isEmpty()) return
+
+        burstPolyline = map.addPolyline(
+            PolylineOptions()
+                .addAll(points)
+                .width(6f)
+                .color(0xFF1565C0.toInt())
+                .jointType(JointType.ROUND)
+                .startCap(RoundCap())
+                .endCap(RoundCap())
+        )
+    }
+
+    /**
+     * Smoothly animates the camera to a bounding box that tightly fits all
+     * points in [trajectory] with generous padding.
+     */
+    private fun animateToBurstBounds(trajectory: List<LatLng>) {
+        if (trajectory.isEmpty()) return
+
+        val builder = LatLngBounds.builder()
+        trajectory.forEach { builder.include(it) }
+        val bounds = builder.build()
+
+        map.animateCamera(
+            CameraUpdateFactory.newLatLngBounds(bounds, 120) // 120px padding
+        )
+    }
+
+    /**
+     * Extracts a heading value (degrees 0–360) from the [description]
+     * stored by [com.navisense.ui.MainViewModel.executeVisualBurstLocalization].
+     *
+     * Expected format: `"... Heading XX.X°."`
+     *
+     * @return The heading in degrees, or `0.0` if parsing fails.
+     */
+    private fun extractHeading(description: String): Double {
+        val regex = Regex("""Heading\s+([\d.]+)°""")
+        return regex.find(description)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
     }
 
     // ── Visual Pin Marker (from ViT backend) ───────────────────────

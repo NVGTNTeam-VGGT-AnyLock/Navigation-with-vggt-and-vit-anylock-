@@ -43,6 +43,19 @@ data class VisualLocateResponse(
 )
 
 /**
+ * Response from the VGGT-1B visual-odometry endpoint `/api/v1/vggt-odometry`.
+ *
+ * @property status              Processing status string, e.g. `"success"`.
+ * @property camera_center_offset Map with keys `"x"`, `"y"`, `"z"` representing the
+ *                                relative camera-centre offset of the last frame in
+ *                                the burst sequence.
+ */
+data class VggtOdometryResponse(
+    val status: String,
+    val camera_center_offset: Map<String, Double>
+)
+
+/**
  * Retrofit interface for communicating with the NaviSense backend API.
  * All endpoints are relative to the base URL configured via BuildConfig.BACKEND_URL.
  */
@@ -64,7 +77,7 @@ interface NaviSenseApi {
      * Sends a captured image together with an optional [locationScope] string
      * (e.g. "Kyiv", "Shevchenkivskyi") to narrow the search space.
      *
-     * @param image         Multipart body part containing the JPEG image file.
+     * @param file          Multipart body part containing the JPEG image file.
      * @param locationScope RequestBody containing the confirmed location scope
      *                      as a form parameter, or an empty string for a full-world search.
      * @return VisualLocateResponse with estimated coordinates and confidence score.
@@ -72,7 +85,25 @@ interface NaviSenseApi {
     @Multipart
     @POST("api/visual-locate")
     suspend fun visualLocate(
-        @Part image: MultipartBody.Part,
+        @Part file: MultipartBody.Part,
         @Part("location_scope") locationScope: RequestBody
     ): Response<VisualLocateResponse>
+
+    /**
+     * VGGT-1B visual odometry for burst-capture sequences.
+     *
+     * Accepts a list of 2+ JPEG images captured in quick succession.
+     * The backend estimates the relative camera-centre offset of the
+     * last frame with respect to the sequence's world coordinate system.
+     *
+     * @param files List of multipart body parts, each containing a JPEG image.
+     *              The form-data field name **must** be `"files"` to match the
+     *              FastAPI parameter `files: list[UploadFile] = File(...)`.
+     * @return VggtOdometryResponse with status and 3D offset.
+     */
+    @Multipart
+    @POST("api/v1/vggt-odometry")
+    suspend fun vggtOdometry(
+        @Part files: List<MultipartBody.Part>
+    ): Response<VggtOdometryResponse>
 }

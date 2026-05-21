@@ -200,4 +200,8 @@
     <!-- Mock Location 10: Novus – Lvivska Ploshcha -->
     <string name="mock_loc_10_title">Novus – Lvivska Ploshcha</string>
     <string name="mock_loc_10_desc">Modern supermarket with organic section and bakery.</string>
+
+    <!-- Burst Capture Test Button -->
+    <string name="test_burst_button">Test Khreshchatyk Burst</string>
+    <string name="toast_burst_success">Burst localisation complete!</string>
 </resources>

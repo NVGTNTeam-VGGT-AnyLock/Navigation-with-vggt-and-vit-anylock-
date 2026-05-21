@@ -84,6 +84,39 @@ class FileManagerService(private val context: Context) {
     }
 
     /**
+     * Prepares a list of [MultipartBody.Part] for the VGGT burst-upload endpoint.
+     *
+     * Each part uses the form-data field name `"files"` to match the FastAPI
+     * parameter `files: list[UploadFile] = File(...)` in `/api/v1/vggt-odometry`.
+     *
+     * @param files List of JPEG files to upload.
+     * @return List of [MultipartBody.Part] ready for a batch network request.
+     * @throws FileManagerException if any file does not exist or cannot be read.
+     */
+    @Throws(FileManagerException::class)
+    fun prepareBatchImageParts(files: List<File>): List<MultipartBody.Part> {
+        return files.map { file ->
+            if (!file.exists() || !file.isFile) {
+                throw FileManagerException(
+                    "File does not exist or is not a regular file: ${file.name}"
+                )
+            }
+            try {
+                val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                MultipartBody.Part.createFormData("files", file.name, requestFile)
+            } catch (e: SecurityException) {
+                throw FileManagerException(
+                    "Security exception while preparing batch image part", e
+                )
+            } catch (e: IOException) {
+                throw FileManagerException(
+                    "I/O error while preparing batch image part", e
+                )
+            }
+        }
+    }
+
+    /**
      * Securely deletes a JPEG file after successful network response.
      * @param file the file to delete
      * @return true if the file was successfully deleted, false otherwise

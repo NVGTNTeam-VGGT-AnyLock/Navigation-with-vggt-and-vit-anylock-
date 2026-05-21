@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Import / mock ML dependencies ────────────────────────────────────
-USE_MOCK = False
+USE_MOCK = True
 try:
     from app.feature_extractor import get_extractor, get_vit_extractor
     from app.vector_db import get_vector_db, get_vit_vector_db

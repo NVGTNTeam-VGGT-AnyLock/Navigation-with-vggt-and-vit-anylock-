@@ -246,4 +246,115 @@ class LocalizationApiClient private constructor(
                 ?: IOException("Visual locate failed after $MAX_RETRIES retries")
         }
     }
+
+    /**
+     * Sends a burst sequence of images to the VGGT-1B visual‑odometry endpoint
+     * `/api/v1/vggt-odometry` to estimate the relative camera‑centre offset.
+     *
+     * The backend requires **2 or more** images captured in quick succession.
+     * Each file is prepared as a separate `MultipartBody.Part` with the form-data
+     * field name `"files"`.
+     *
+     * All temporary files are cleaned up after success **or** after all retries
+     * are exhausted.
+     *
+     * @param files List of JPEG files (≥2) forming the burst capture sequence.
+     * @return A [VggtOdometryResponse] containing the processing status and
+     *         3D offset `{"x": …, "y": …, "z": …}`.
+     * @throws IllegalArgumentException if fewer than 2 files are provided.
+     * @throws IOException if the network request fails after all retries.
+     * @throws FileManagerService.FileManagerException if any file cannot be prepared.
+     */
+    suspend fun vggtOdometry(
+        files: List<File>
+    ): VggtOdometryResponse = withContext(Dispatchers.IO) {
+        // ── Precondition: burst capture requires ≥2 images ────────────
+        if (files.size < 2) {
+            throw IllegalArgumentException(
+                "VGGT odometry requires at least 2 images, but ${files.size} were provided."
+            )
+        }
+
+        var lastException: IOException? = null
+        var finalResponse: VggtOdometryResponse? = null
+
+        for (attempt in 0..MAX_RETRIES) {
+            try {
+                // Prepare multipart parts for all files (fresh each attempt)
+                val imageParts = fileManagerService.prepareBatchImageParts(files)
+
+                // Perform the network request
+                val response: Response<VggtOdometryResponse> =
+                    api.vggtOdometry(imageParts)
+
+                if (!response.isSuccessful) {
+                    val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                    fileManagerService.logError(
+                        "Backend returned HTTP ${response.code()}: $errorBody"
+                    )
+                    // Retry only on server errors (5xx); client errors (4xx) are fatal
+                    if (response.code() >= 500 && attempt < MAX_RETRIES) {
+                        val backoffDelay = (
+                                INITIAL_RETRY_DELAY_MS *
+                                        BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                                ).toLong()
+                        delay(backoffDelay)
+                        continue
+                    } else {
+                        when (response.code()) {
+                            400 -> throw IOException(
+                                "Bad request – ensure at least 2 valid JPEG images are provided"
+                            )
+                            else -> throw IOException(
+                                "Backend error ${response.code()}: $errorBody"
+                            )
+                        }
+                    }
+                }
+
+                val odometryResponse = response.body()
+                    ?: throw IOException("Backend returned empty response body")
+
+                // Successful response – clean up all temporary files
+                files.forEach { file -> fileManagerService.deleteImage(file) }
+                finalResponse = odometryResponse
+                break
+
+            } catch (e: SocketTimeoutException) {
+                lastException = e
+                fileManagerService.logError(
+                    "Network timeout on attempt ${attempt + 1}: ${e.message}"
+                )
+                if (attempt == MAX_RETRIES) break
+                val backoffDelay = (
+                        INITIAL_RETRY_DELAY_MS *
+                                BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                        ).toLong()
+                delay(backoffDelay)
+            } catch (e: IOException) {
+                lastException = e
+                fileManagerService.logError(
+                    "Network I/O error on attempt ${attempt + 1}: ${e.message}"
+                )
+                if (attempt == MAX_RETRIES) break
+                val backoffDelay = (
+                        INITIAL_RETRY_DELAY_MS *
+                                BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                        ).toLong()
+                delay(backoffDelay)
+            } catch (e: Exception) {
+                fileManagerService.logError(
+                    "Unexpected error during VGGT odometry: ${e.message}"
+                )
+                throw e
+            }
+        }
+
+        return@withContext finalResponse ?: run {
+            // Clean up all files even after final failure
+            files.forEach { file -> fileManagerService.deleteImage(file) }
+            throw lastException
+                ?: IOException("VGGT odometry failed after $MAX_RETRIES retries")
+        }
+    }
 }

@@ -179,6 +179,10 @@ class VisualSearchFragment : Fragment() {
 
         // Observe the visual locate result & error
         observeVisualLocateResult()
+
+        // Initialise the GPS-free burst capture test button
+        initTestBurstButton()
+        observeBurstLocalizationResult()
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -725,6 +729,71 @@ class VisualSearchFragment : Fragment() {
     private fun navigateToMap() {
         Log.d(NAVISENSE_DEBUG_TAG, "Navigating to MapFragment")
         findNavController().navigate(R.id.mapFragment)
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  GPS‑free Burst Capture Test
+    // ═════════════════════════════════════════════════════════════════
+
+    /**
+     * Wires the "Test Khreshchatyk Burst" button to invoke the sensor‑fusion
+     * pipeline in [MainViewModel.executeVisualBurstLocalization].
+     *
+     * While running the full‑screen loading overlay is shown and all
+     * interactive elements are disabled. The original CameraX scanner
+     * logic remains completely untouched.
+     */
+    private fun initTestBurstButton() {
+        binding.btnTestBurst.setOnClickListener {
+            Log.d(NAVISENSE_DEBUG_TAG, "Test burst button tapped — starting sensor‑fusion pipeline")
+
+            // Show full‑screen loader and disable all controls
+            showLoading(getString(R.string.analysing_visual_data))
+            binding.btnTestBurst.isEnabled = false
+
+            // Fire‑and‑forget the burst pipeline (runs on viewModelScope internally)
+            viewModel.executeVisualBurstLocalization()
+        }
+    }
+
+    /**
+     * Observes [MainViewModel.mockMatchLocation] for the result of the
+     * burst capture pipeline. On the first non‑null emission:
+     *
+     * 1. Dismisses the loading overlay.
+     * 2. Shows a success [Toast].
+     * 3. Navigates to the [MapFragment].
+     *
+     * Uses [repeatOnLifecycle] so observation automatically stops when the
+     * fragment's view is destroyed.
+     */
+    private fun observeBurstLocalizationResult() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.mockMatchLocation.collect { match ->
+                    if (match != null) {
+                        Log.d(
+                            NAVISENSE_DEBUG_TAG,
+                            "Burst localisation result received: " +
+                                    "lat=${match.latitude}, lon=${match.longitude}"
+                        )
+
+                        // Dismiss loader and re‑enable controls
+                        hideLoading()
+                        binding.btnTestBurst.isEnabled = true
+
+                        Toast.makeText(
+                            requireContext(),
+                            R.string.toast_burst_success,
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        // Navigate to Map so the user can see the trajectory
+                        navigateToMap()
+                    }
+                }
+            }
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════
