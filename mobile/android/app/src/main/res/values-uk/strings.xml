@@ -197,4 +197,12 @@
     <!-- Mock Location 10: Novus – Lvivska Ploshcha -->
     <string name="mock_loc_10_title">Novus – Львівська площа</string>
     <string name="mock_loc_10_desc">Сучасний супермаркет з органічним відділом та пекарнею.</string>
+
+    <!-- Dashcam Background Service -->
+    <string name="dashcam_channel_name">Запис відеореєстратора</string>
+    <string name="dashcam_channel_description">Фонова зйомка для живого позиціонування</string>
+    <string name="dashcam_notification_title">Відеореєстратор активний</string>
+    <string name="dashcam_notification_text">Захоплення кадрів для живого позиціонування…</string>
+    <string name="dashcam_marker_title">Позиція відеореєстратора</string>
+    <string name="dashcam_permission_required">Для режиму відеореєстратора потрібен дозвіл на сповіщення</string>
 </resources>

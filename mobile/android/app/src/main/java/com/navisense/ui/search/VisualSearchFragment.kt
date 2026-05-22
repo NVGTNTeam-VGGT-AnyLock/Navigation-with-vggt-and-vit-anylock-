@@ -3,6 +3,10 @@ package com.navisense.ui.search
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -28,7 +32,9 @@ import com.navisense.databinding.FragmentVisualSearchBinding
 import com.navisense.model.AppLocation
 import com.navisense.model.AppLocationCategory
 import com.navisense.ui.MainViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 
@@ -95,8 +101,15 @@ class VisualSearchFragment : Fragment() {
     // ── Permissions Required Dialog ─────────────────────────────────
     private var permissionsRequiredDialog: AlertDialog? = null
 
-    // ── Captured file reference (held across dialog flow) ───────────
+    // ── Captured file references (held across dialog flow) ──────────
+    /** Single file for legacy non‑burst capture. */
     private var pendingCapturedFile: File? = null
+
+    /** Burst files (5 frames) for live‑burst or video‑extraction flow. */
+    private var pendingBurstFiles: MutableList<File>? = null
+
+    /** Whether the current pending data originates from the live camera (true) or video (false). */
+    private var isLiveCameraBurst: Boolean = true
 
     // ── Camera Permission Launcher ──────────────────────────────────
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -145,10 +158,18 @@ class VisualSearchFragment : Fragment() {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            Log.d(NAVISENSE_DEBUG_TAG, "Photo picked from gallery: $uri")
-            // Photo picked from gallery — start location confirmation
-            pendingCapturedFile = null
-            visualSearchViewModel.fetchAndConfirmLocation()
+            val mimeType = requireContext().contentResolver.getType(uri) ?: "image/*"
+            Log.d(NAVISENSE_DEBUG_TAG, "Gallery picker returned: $uri (type=$mimeType)")
+
+            if (mimeType.startsWith("video/")) {
+                // ── Video file → extract 5 frames ───────────────────
+                handleVideoPicked(uri)
+            } else {
+                // ── Single image (legacy flow) ──────────────────────
+                pendingCapturedFile = null
+                pendingBurstFiles = null
+                visualSearchViewModel.fetchAndConfirmLocation()
+            }
         }
     }
 
@@ -179,6 +200,10 @@ class VisualSearchFragment : Fragment() {
 
         // Observe the visual locate result & error
         observeVisualLocateResult()
+
+        // Initialise the GPS-free burst capture test button
+        initTestBurstButton()
+        observeBurstLocalizationResult()
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -598,16 +623,18 @@ class VisualSearchFragment : Fragment() {
         // Disable capture button during processing to prevent double-taps
         binding.btnCapture.isEnabled = false
 
-        Log.d(NAVISENSE_DEBUG_TAG, "Initiating photo capture")
+        Log.d(NAVISENSE_DEBUG_TAG, "Initiating burst capture (5 frames)")
 
-        scanner.captureSharpImage(
-            onSuccess = { savedFile ->
+        // ── Burst capture (5 frames) ────────────────────────────────
+        scanner.captureBurst(
+            count = 5,
+            onSuccess = { files ->
                 // Re-enable capture button
                 binding.btnCapture.isEnabled = true
 
                 Log.d(
                     NAVISENSE_DEBUG_TAG,
-                    "Image captured and saved: ${savedFile.absolutePath} (size=${savedFile.length()} bytes)"
+                    "Burst capture complete: ${files.size} frames saved"
                 )
 
                 // Notify the user
@@ -617,8 +644,10 @@ class VisualSearchFragment : Fragment() {
                     Toast.LENGTH_SHORT
                 ).show()
 
-                // Hold a reference so we can clean up after the search
-                pendingCapturedFile = savedFile
+                // Hold references for the sensor‑fusion pipeline
+                pendingBurstFiles = files.toMutableList()
+                pendingCapturedFile = null
+                isLiveCameraBurst = true
 
                 // Start the rough-location confirmation flow
                 visualSearchViewModel.fetchAndConfirmLocation()
@@ -629,19 +658,19 @@ class VisualSearchFragment : Fragment() {
 
                 val messageResId = when (exception) {
                     is ScannerCamera.ImageTooBlurryException -> {
-                        Log.w(NAVISENSE_DEBUG_TAG, "Capture failed: image too blurry", exception)
+                        Log.w(NAVISENSE_DEBUG_TAG, "Burst capture failed: image too blurry", exception)
                         R.string.toast_image_blurry
                     }
                     is FileManagerService.InsufficientStorageException -> {
-                        Log.e(NAVISENSE_DEBUG_TAG, "Capture failed: insufficient storage", exception)
+                        Log.e(NAVISENSE_DEBUG_TAG, "Burst capture failed: insufficient storage", exception)
                         R.string.toast_storage_insufficient
                     }
                     is FileManagerService.FileManagerException -> {
-                        Log.e(NAVISENSE_DEBUG_TAG, "Capture failed: file manager error", exception)
+                        Log.e(NAVISENSE_DEBUG_TAG, "Burst capture failed: file manager error", exception)
                         R.string.toast_file_error
                     }
                     else -> {
-                        Log.e(NAVISENSE_DEBUG_TAG, "Capture failed: unexpected error", exception)
+                        Log.e(NAVISENSE_DEBUG_TAG, "Burst capture failed: unexpected error", exception)
                         R.string.toast_camera_error
                     }
                 }
@@ -656,8 +685,9 @@ class VisualSearchFragment : Fragment() {
     // ═════════════════════════════════════════════════════════════════
 
     private fun pickFromGallery() {
-        Log.d(NAVISENSE_DEBUG_TAG, "Opening gallery picker")
-        galleryLauncher.launch("image/*")
+        Log.d(NAVISENSE_DEBUG_TAG, "Opening gallery picker for images and videos")
+        // Accept both image/* and video/* so the user can also upload MP4 recordings
+        galleryLauncher.launch("image/*, video/*")
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -677,13 +707,27 @@ class VisualSearchFragment : Fragment() {
      * the backend call and falls back gracefully.
      */
     private fun proceedWithSearch() {
-        val file = pendingCapturedFile
         val scope = visualSearchViewModel.confirmedScope.value
 
+        // ── Check if we have burst files (live camera burst or video extraction) ──
+        val burstFiles = pendingBurstFiles
+        if (burstFiles != null && burstFiles.size >= 2) {
+            Log.d(
+                NAVISENSE_DEBUG_TAG,
+                "Proceeding with burst search: ${burstFiles.size} files, scope=$scope"
+            )
+
+            // Fire the full sensor‑fusion pipeline (ViT + VGGT)
+            viewModel.liveBurstCapture(burstFiles, scope)
+            return
+        }
+
+        // ── Legacy single‑file fallback ──────────────────────────────
+        val file = pendingCapturedFile
         if (file == null) {
             Log.w(
                 NAVISENSE_DEBUG_TAG,
-                "proceedWithSearch called but pendingCapturedFile is null — nothing to search"
+                "proceedWithSearch called but no files pending — nothing to search"
             )
             Toast.makeText(
                 requireContext(),
@@ -694,7 +738,7 @@ class VisualSearchFragment : Fragment() {
             return
         }
 
-        Log.d(NAVISENSE_DEBUG_TAG, "Proceeding with search: file=${file.name}, scope=$scope")
+        Log.d(NAVISENSE_DEBUG_TAG, "Proceeding with single‑file search: file=${file.name}, scope=$scope")
 
         // Launch the real ViT backend call
         visualSearchViewModel.performVisualLocate(file, scope)
@@ -728,6 +772,71 @@ class VisualSearchFragment : Fragment() {
     }
 
     // ═════════════════════════════════════════════════════════════════
+    //  GPS‑free Burst Capture Test
+    // ═════════════════════════════════════════════════════════════════
+
+    /**
+     * Wires the "Test Khreshchatyk Burst" button to invoke the sensor‑fusion
+     * pipeline in [MainViewModel.executeVisualBurstLocalization].
+     *
+     * While running the full‑screen loading overlay is shown and all
+     * interactive elements are disabled. The original CameraX scanner
+     * logic remains completely untouched.
+     */
+    private fun initTestBurstButton() {
+        binding.btnTestBurst.setOnClickListener {
+            Log.d(NAVISENSE_DEBUG_TAG, "Test burst button tapped — starting sensor‑fusion pipeline")
+
+            // Show full‑screen loader and disable all controls
+            showLoading(getString(R.string.analysing_visual_data))
+            binding.btnTestBurst.isEnabled = false
+
+            // Fire‑and‑forget the burst pipeline (runs on viewModelScope internally)
+            viewModel.executeVisualBurstLocalization()
+        }
+    }
+
+    /**
+     * Observes [MainViewModel.mockMatchLocation] for the result of the
+     * burst capture pipeline. On the first non‑null emission:
+     *
+     * 1. Dismisses the loading overlay.
+     * 2. Shows a success [Toast].
+     * 3. Navigates to the [MapFragment].
+     *
+     * Uses [repeatOnLifecycle] so observation automatically stops when the
+     * fragment's view is destroyed.
+     */
+    private fun observeBurstLocalizationResult() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.mockMatchLocation.collect { match ->
+                    if (match != null) {
+                        Log.d(
+                            NAVISENSE_DEBUG_TAG,
+                            "Burst localisation result received: " +
+                                    "lat=${match.latitude}, lon=${match.longitude}"
+                        )
+
+                        // Dismiss loader and re‑enable controls
+                        hideLoading()
+                        binding.btnTestBurst.isEnabled = true
+
+                        Toast.makeText(
+                            requireContext(),
+                            R.string.toast_burst_success,
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        // Navigate to Map so the user can see the trajectory
+                        navigateToMap()
+                    }
+                }
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════
     //  File Cleanup
     // ═════════════════════════════════════════════════════════════════
 
@@ -754,6 +863,148 @@ class VisualSearchFragment : Fragment() {
             Log.e(NAVISENSE_DEBUG_TAG, "Failed to clear TempScans after search: ${e.message}", e)
             fms.logError("Failed to clear TempScans after search: ${e.message}")
         }
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Video Frame Extraction (Feature 3)
+    // ═════════════════════════════════════════════════════════════════
+
+    /**
+     * Handles a video file picked from the gallery.
+     * Extracts 5 chronological frames using [MediaMetadataRetriever],
+     * saves them as JPEG files to TempScans/, and then feeds them through
+     * the same sensor‑fusion pipeline as a live camera burst.
+     */
+    private fun handleVideoPicked(videoUri: Uri) {
+        Log.d(NAVISENSE_DEBUG_TAG, "Video picked from gallery: $videoUri — extracting 5 frames")
+
+        showLoading(getString(R.string.analysing_visual_data))
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val extractedFiles = withContext(Dispatchers.IO) {
+                    extractVideoFrames(videoUri)
+                }
+
+                if (extractedFiles.size < 2) {
+                    Log.e(NAVISENSE_DEBUG_TAG, "Video extraction returned < 2 frames")
+                    Toast.makeText(
+                        requireContext(),
+                        R.string.toast_camera_error,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    hideLoading()
+                    return@launch
+                }
+
+                Log.d(
+                    NAVISENSE_DEBUG_TAG,
+                    "Extracted ${extractedFiles.size} frames from video"
+                )
+
+                // Store frames and start location confirmation
+                pendingBurstFiles = extractedFiles.toMutableList()
+                pendingCapturedFile = null
+                isLiveCameraBurst = false
+
+                hideLoading()
+                visualSearchViewModel.fetchAndConfirmLocation()
+
+            } catch (e: Exception) {
+                Log.e(NAVISENSE_DEBUG_TAG, "Video frame extraction failed: ${e.message}", e)
+                hideLoading()
+                Toast.makeText(
+                    requireContext(),
+                    R.string.toast_camera_error,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * Extracts 5 chronologically spaced frames from a video file using
+     * [MediaMetadataRetriever], converts them to JPEG, and saves them to
+     * the TempScans/ directory via [FileManagerService].
+     *
+     * @param videoUri The content URI of the video file.
+     * @return List of saved JPEG [File]s, one per extracted frame.
+     */
+    private suspend fun extractVideoFrames(videoUri: Uri): List<File> {
+        val fms = fileManagerService ?: throw IOException("FileManagerService not initialised")
+
+        val retriever = MediaMetadataRetriever()
+        val files = mutableListOf<File>()
+
+        try {
+            retriever.setDataSource(requireContext(), videoUri)
+
+            // Get video duration in microseconds
+            val durationUs = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull()?.times(1000L) ?: 1_000_000L // fallback 1 sec
+
+            val frameCount = 5
+            val extractedFrames = mutableListOf<Bitmap>()
+
+            // Extract 5 evenly-spaced frames
+            for (i in 0 until frameCount) {
+                val timeUs = if (frameCount > 1) {
+                    durationUs * i / (frameCount - 1)
+                } else {
+                    0L
+                }
+
+                val bitmap = retriever.getFrameAtTime(
+                    timeUs,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                )
+
+                if (bitmap != null) {
+                    extractedFrames.add(bitmap)
+                    Log.d(NAVISENSE_DEBUG_TAG, "Video frame $i at ${timeUs / 1000L}ms — extracted")
+                } else {
+                    Log.w(NAVISENSE_DEBUG_TAG, "Video frame $i at ${timeUs / 1000L}ms — null, skipping")
+                }
+            }
+
+            // If we got fewer than 2 frames, try again with OPTION_CLOSEST
+            if (extractedFrames.size < 2) {
+                Log.w(NAVISENSE_DEBUG_TAG, "Too few video frames extracted, retrying with OPTION_CLOSEST")
+                for (i in 0 until frameCount) {
+                    val timeUs = if (frameCount > 1) {
+                        durationUs * i / (frameCount - 1)
+                    } else {
+                        0L
+                    }
+                    val bitmap = retriever.getFrameAtTime(
+                        timeUs,
+                        MediaMetadataRetriever.OPTION_CLOSEST
+                    )
+                    if (bitmap != null && !extractedFrames.contains(bitmap)) {
+                        extractedFrames.add(bitmap)
+                    }
+                }
+            }
+
+            // Save each extracted frame as JPEG
+            extractedFrames.forEachIndexed { index, bitmap ->
+                val stream = java.io.ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                val jpegBytes = stream.toByteArray()
+                val savedFile = fms.saveImage(jpegBytes)
+                files.add(savedFile)
+                Log.d(NAVISENSE_DEBUG_TAG, "Video frame ${index + 1} saved: ${savedFile.name}")
+                bitmap.recycle()
+            }
+
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) { }
+        }
+
+        return files
     }
 
     // ═════════════════════════════════════════════════════════════════

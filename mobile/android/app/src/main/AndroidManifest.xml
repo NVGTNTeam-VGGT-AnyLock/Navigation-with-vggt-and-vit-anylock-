@@ -12,8 +12,15 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Camera: for visual positioning (ScannerCamera) -->
+    <!-- Camera: for visual positioning (ScannerCamera + Dashcam) -->
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Foreground Service: for DashcamBackgroundService -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+
+    <!-- Notifications: for Dashcam foreground service (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Storage: for TempScans – API 26+ uses scoped storage,
          but keep for broad compatibility -->
@@ -48,6 +55,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.NaviSense"
+        android:usesCleartextTraffic="true"
         tools:targetApi="34">
 
         <!--
@@ -59,7 +67,7 @@
             ║  manifestPlaceholders from local.properties.                ║
             ║                                                            ║
             ║  On your local machine, add to the ROOT local.properties:   ║
-║    MAPS_API_KEY=AIzaSy...your_real_key...                 ║
+            ║    MAPS_API_KEY=AIzaSy...your_real_key...                 ║
             ║                                                            ║
             ║  If the property is missing, a dummy fallback is used      ║
             ║  so CI/CD builds still succeed.                            ║
@@ -83,6 +91,12 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Dashcam Background Service (headless CameraX foreground service) -->
+        <service
+            android:name=".core.DashcamBackgroundService"
+            android:foregroundServiceType="camera"
+            android:exported="false" />
 
     </application>
 

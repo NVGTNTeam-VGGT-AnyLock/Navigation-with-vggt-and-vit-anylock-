@@ -200,4 +200,17 @@
     <!-- Mock Location 10: Novus – Lvivska Ploshcha -->
     <string name="mock_loc_10_title">Novus – Lvivska Ploshcha</string>
     <string name="mock_loc_10_desc">Modern supermarket with organic section and bakery.</string>
+
+    <!-- Burst Capture Test Button -->
+    <string name="test_burst_button">Test Khreshchatyk Burst</string>
+    <string name="toast_burst_success">Burst localisation complete!</string>
+
+    <!-- Dashcam Background Service -->
+    <string name="dashcam_channel_name">Dashcam Recording</string>
+    <string name="dashcam_channel_description">Background camera capture for live positioning</string>
+    <string name="dashcam_notification_title">Dashcam Active</string>
+    <string name="dashcam_notification_text">Capturing frames for live positioning…</string>
+    <string name="dashcam_marker_title">Dashcam Position</string>
+    <string name="dashcam_permission_required">Notification permission is required for Dashcam mode</string>
+    <string name="permission_camera_required">Camera access is required for Dashcam mode. Please grant the Camera permission.</string>
 </resources>

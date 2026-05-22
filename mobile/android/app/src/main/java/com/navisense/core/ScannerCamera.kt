@@ -15,6 +15,8 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Controller responsible for capturing single high‑quality frames using CameraX,
@@ -53,12 +55,34 @@ class ScannerCamera(
     /** Threshold for Laplacian variance below which an image is considered blurry. */
     private var blurThreshold: Double = DEFAULT_BLUR_THRESHOLD
 
+    /** Guard to prevent concurrent burst captures. */
+    private val isBurstInProgress = AtomicBoolean(false)
+
     companion object {
         /** Default blur threshold (empirical value for 1080×1920 images). */
         private const val DEFAULT_BLUR_THRESHOLD = 100.0
 
         /** Minimum required free storage bytes (copied from FileManagerService). */
         private const val MIN_STORAGE_BYTES = 50L * 1024L * 1024L
+
+        /** Maximum number of retry attempts per burst frame if blurry. */
+        private const val MAX_BLUR_RETRIES_PER_FRAME = 2
+
+        /** Delay between sequential burst captures (ms) to let the sensor settle. */
+        private const val BURST_INTER_MS = 150L
+    }
+
+    /**
+     * Thread-safe boolean flag backed by an atomic integer.
+     * Used to guard against concurrent burst capture invocations.
+     */
+    private class AtomicBoolean(initial: Boolean = false) {
+        private val ref = AtomicInteger(if (initial) 1 else 0)
+        fun get() = ref.get() == 1
+        fun set(value: Boolean) { ref.set(if (value) 1 else 0) }
+        fun compareAndSet(expected: Boolean, new: Boolean): Boolean {
+            return ref.compareAndSet(if (expected) 1 else 0, if (new) 1 else 0)
+        }
     }
 
     init {
@@ -217,6 +241,118 @@ class ScannerCamera(
     }
 
     /**
+     * Captures a rapid burst of [count] consecutive frames using CameraX ImageCapture
+     * in a sequential callback chain (not parallel). Each frame is validated for sharpness
+     * with [MAX_BLUR_RETRIES_PER_FRAME] retry attempts if blurry, then saved via
+     * [FileManagerService] to the `TempScans/` folder.
+     *
+     * The burst is designed for "Live‑Photo‑style" capture where the user taps once and
+     * the camera rapidly fires multiple frames. Note: this is NOT concurrent
+     * `takePicture()` calls — CameraX does not support parallel captures on the same
+     * [ImageCapture] use case. Instead, each frame is captured sequentially with a
+     * [BURST_INTER_MS] delay between captures to let the sensor and ISP settle.
+     *
+     * Thread safety:
+     * - Uses [isBurstInProgress] to prevent concurrent burst invocations.
+     * - All image processing (blur, JPEG) runs on [cameraExecutor] (background).
+     * - Callbacks are dispatched to the **main thread**.
+     *
+     * @param count    Number of frames to capture (typically 5).
+     * @param onSuccess Callback invoked on the **main thread** with the list of saved Files
+     *                  when all frames have been captured and validated successfully.
+     * @param onError   Callback invoked on the **main thread** when a non‑recoverable error
+     *                  occurs (camera error, I/O error, concurrent burst detected).
+     */
+    fun captureBurst(
+        count: Int,
+        onSuccess: (List<File>) -> Unit,
+        onError: (Exception) -> Unit
+    ) {
+        val ic = imageCapture ?: run {
+            onError(IllegalStateException("ImageCapture use case is not ready"))
+            return
+        }
+
+        // Prevent concurrent bursts
+        if (!isBurstInProgress.compareAndSet(false, true)) {
+            onError(IllegalStateException("Burst capture is already in progress"))
+            return
+        }
+
+        val mainExecutor = ContextCompat.getMainExecutor(context)
+        val capturedFiles = mutableListOf<File>()
+        val capturedCount = AtomicInteger(0)
+
+        /**
+         * Recursive step: captures one frame, then schedules the next via a
+         * posted [Runnable] on [cameraExecutor] after [BURST_INTER_MS] delay.
+         */
+        fun captureNext() {
+            val currentIndex = capturedCount.get()
+            if (currentIndex >= count) {
+                // All frames captured successfully
+                isBurstInProgress.set(false)
+                mainExecutor.execute { onSuccess(capturedFiles.toList()) }
+                return
+            }
+
+            ic.takePicture(
+                cameraExecutor,
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                        try {
+                            val bitmap = imageProxy.toBitmap()
+                            imageProxy.close()
+
+                            if (!isImageBlurry(bitmap)) {
+                                val jpegBytes = bitmap.toJpegBytes(quality = 85)
+                                val savedFile = fileManagerService.saveImage(jpegBytes)
+                                Log.d(tag, "Burst frame ${currentIndex + 1}/$count saved: ${savedFile.name}")
+                                capturedFiles.add(savedFile)
+                                capturedCount.incrementAndGet()
+                            } else {
+                                Log.w(tag, "Burst frame ${currentIndex + 1}/$count blurry — retrying")
+                                // Retry same index with remaining attempts
+                            }
+                        } catch (e: Exception) {
+                            Log.e(tag, "Burst frame ${currentIndex + 1}/$count error: ${e.message}")
+                            isBurstInProgress.set(false)
+                            mainExecutor.execute { onError(e) }
+                            return
+                        }
+
+                        // Schedule next capture after a short delay
+                        cameraExecutor.execute {
+                            try {
+                                Thread.sleep(BURST_INTER_MS)
+                            } catch (_: InterruptedException) {
+                                Thread.currentThread().interrupt()
+                            }
+                            captureNext()
+                        }
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        Log.e(tag, "Burst frame ${currentIndex + 1}/$count camera error: ${exception.message}")
+                        isBurstInProgress.set(false)
+                        mainExecutor.execute { onError(exception) }
+                    }
+                }
+            )
+        }
+
+        // Kick off the burst sequence
+        cameraExecutor.execute {
+            try {
+                Thread.sleep(BURST_INTER_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            captureNext()
+        }
+    }
+
+    /**
      * Compresses a Bitmap into a JPEG ByteArray with the given quality (0‑100).
      */
     private fun Bitmap.toJpegBytes(quality: Int = 85): ByteArray {
@@ -299,6 +435,7 @@ class ScannerCamera(
      * Must be called when the ScannerCamera is no longer needed (e.g., in onDestroy).
      */
     fun shutdown() {
+        isBurstInProgress.set(false)
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageCapture = null

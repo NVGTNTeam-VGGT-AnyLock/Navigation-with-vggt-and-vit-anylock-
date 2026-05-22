@@ -26,6 +26,21 @@
             android:layout_height="match_parent"
             android:scaleType="centerCrop" />
 
+        <!-- Test Burst Button (distinct amber/orange tonal style, sits above capture) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_test_burst"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="104dp"
+            android:text="@string/test_burst_button"
+            android:textColor="@color/naviSense_accent"
+            app:cornerRadius="20dp"
+            app:icon="@drawable/ic_search_photo"
+            app:strokeColor="@color/naviSense_accent"
+            app:strokeWidth="1dp" />
+
         <!-- Capture Button (centred over preview) -->
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/btn_capture"

@@ -9,6 +9,9 @@ import com.google.maps.DirectionsApi
 import com.google.maps.GeoApiContext
 import com.google.maps.android.PolyUtil
 import com.navisense.BuildConfig
+import com.navisense.core.NaviSenseApi
+import com.navisense.core.VisualLocateResponse
+import com.navisense.core.VggtOdometryResponse
 import com.navisense.data.LocationRepository
 import com.navisense.data.RoomLocationRepositoryImpl
 import com.navisense.data.local.AppDatabase
@@ -17,6 +20,7 @@ import com.navisense.model.AppLocationCategory
 import com.navisense.model.LocationState
 import com.navisense.model.NavMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,7 +32,26 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import java.io.File
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.util.concurrent.TimeUnit
 
 /**
  * Shared ViewModel for the entire Location Management App.
@@ -59,15 +82,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .apiKey(BuildConfig.MAPS_API_KEY)
                 .build()
         }
+
+        /** Retrofit [NaviSenseApi] singleton for the sensor‑fusion pipeline. */
+        private val naviSenseApi: NaviSenseApi by lazy {
+            val loggingInterceptor = HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.HEADERS
+            }
+
+            val okHttpClient = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .addInterceptor(loggingInterceptor)
+                .build()
+
+            Retrofit.Builder()
+                .baseUrl(BuildConfig.BACKEND_URL)
+                .client(okHttpClient)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+                .create(NaviSenseApi::class.java)
+        }
+
+        /** Number of frames in the burst capture sequence. */
+        private const val BURST_FRAME_COUNT = 5
+
+        /** Asset filenames for the simulated burst sequence. */
+        private val BURST_ASSET_NAMES = (1..BURST_FRAME_COUNT).map { "ref$it.jpg" }
+
+        /** Tag for [Log] statements. */
+        private const val TAG = "MainViewModel"
     }
 
     // ── Database ────────────────────────────────────────────────────
     private val db = AppDatabase.getInstance(application)
 
+    // ── Delivery‑history DAO (used by the KPI cards in Analytics) ───
+    private val deliveryHistoryDao = db.deliveryHistoryDao()
+
     // ── Repository (Room-backed, local-first) ───────────────────────
     private val repository: LocationRepository = RoomLocationRepositoryImpl(
         savedLocationDao = db.savedLocationDao(),
-        deliveryHistoryDao = db.deliveryHistoryDao(),
+        deliveryHistoryDao = deliveryHistoryDao,
         scope = viewModelScope
     )
 
@@ -150,6 +206,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ── State: Visual Search Mock Result ──────────────────────────
     private val _mockMatchLocation = MutableStateFlow<AppLocation?>(null)
     val mockMatchLocation: StateFlow<AppLocation?> = _mockMatchLocation.asStateFlow()
+
+    // ── State: Live Tracking Location (Dashcam mode) ────────────
+    private val _liveTrackingLocation = MutableStateFlow<AppLocation?>(null)
+    val liveTrackingLocation: StateFlow<AppLocation?> = _liveTrackingLocation.asStateFlow()
 
     // ── State: Navigation Mode ────────────────────────────────────
     private val _navMode = MutableStateFlow(NavMode.SCANNER)
@@ -385,75 +445,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * as a fallback.
      */
     fun optimizeRoute() {
-        val waypoints = _routeWaypoints.value
-        if (waypoints.size < 2) {
-            _routePolylinePoints.value = emptyList()
-            return
-        }
+        val currentWaypoints = _routeWaypoints.value
+        if (currentWaypoints.size < 3) return // Оптимізація потрібна від 3 точок
 
-        _isOptimizing.value = true
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val originStr = "${waypoints.first().latitude},${waypoints.first().longitude}"
-                val destinationStr = "${waypoints.last().latitude},${waypoints.last().longitude}"
+        val unvisited = currentWaypoints.toMutableList()
+        val optimized = mutableListOf<AppLocation>()
 
-                // Build the Directions API request using the correct fluent API
-                val request = DirectionsApi.newRequest(geoApiContext)
-                    .origin(originStr)
-                    .destination(destinationStr)
-                    .optimizeWaypoints(true)
+        // 1. Перша точка завжди залишається Стартом (Green marker)
+        val start = unvisited.removeAt(0)
+        optimized.add(start)
 
-                // Add middle waypoints (if any) with TSP optimisation
-                if (waypoints.size > 2) {
-                    val middleStrs = waypoints.subList(1, waypoints.size - 1)
-                        .map { wpt -> "${wpt.latitude},${wpt.longitude}" }
-                        .toTypedArray()
-                    request.waypoints(*middleStrs)
+        // 2. Останній елемент — це Фініш (Red marker), його поки не чіпаємо
+        val finish = unvisited.removeAt(unvisited.size - 1)
+
+        // 3. Сортуємо середні точки за алгоритмом Найближчого Сусіда
+        var current = start
+        while (unvisited.isNotEmpty()) {
+            var nearestIdx = 0
+            var minDist = Double.MAX_VALUE
+
+            for (i in unvisited.indices) {
+                val dist = haversineDistance(
+                    current.latitude, current.longitude,
+                    unvisited[i].latitude, unvisited[i].longitude
+                )
+                if (dist < minDist) {
+                    minDist = dist
+                    nearestIdx = i
                 }
-
-                // Await the blocking API call (on Dispatchers.IO)
-                val result = request.await()
-
-                if (result.routes.isNotEmpty()) {
-                    val route = result.routes.first()
-
-                    // decodePath() returns List<com.google.maps.model.LatLng>
-                    // Map each to com.google.android.gms.maps.model.LatLng for the UI
-                    val apiDecodedPath = route.overviewPolyline.decodePath()
-                    val mappedPath = apiDecodedPath.map { pt ->
-                        LatLng(pt.lat, pt.lng)
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        _routePolylinePoints.value = mappedPath
-
-                        // Reorder middle waypoints per the API's waypointOrder
-                        if (waypoints.size > 2 && route.waypointOrder != null) {
-                            val middle = waypoints.subList(1, waypoints.size - 1)
-                            val reorderedMiddle = route.waypointOrder.map { idx -> middle[idx] }
-                            val newOrder = mutableListOf<AppLocation>()
-                            newOrder.add(waypoints.first())
-                            newOrder.addAll(reorderedMiddle)
-                            newOrder.add(waypoints.last())
-                            _routeWaypoints.value = newOrder
-                        }
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        fallbackToStraightLines(waypoints)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("MainViewModel", "Directions API call failed", e)
-                withContext(Dispatchers.Main) {
-                    fallbackToStraightLines(waypoints)
-                }
-            } finally {
-                _isOptimizing.value = false
             }
+            current = unvisited.removeAt(nearestIdx)
+            optimized.add(current)
         }
+
+        // 4. Повертаємо Фініш в кінець списку
+        optimized.add(finish)
+
+        // Оновлюємо StateFlow, що запустить перемальовування карти
+        _routeWaypoints.value = optimized
+        fallbackToStraightLines(optimized) // Малюємо лінію маршруту
     }
 
+    private fun haversineDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val rEarth = 6371000.0 // Радіус Землі в метрах
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = Math.sin(dLat / 2).let { Math.pow(it, 2.0) } +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLon / 2).let { Math.pow(it, 2.0) }
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return rEarth * c
+    }
     /**
      * Fallback: draw straight-line segments between waypoints when the
      * Directions API request fails or returns no routes.
@@ -492,6 +534,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Explicitly sets the navigation mode.
+     * Used by [DashcamBackgroundService] to set [NavMode.DASHCAM]
+     * and by [VisualSearchFragment] for Scanner mode.
+     */
+    fun setNavMode(mode: NavMode) {
+        _navMode.value = mode
+        if (mode == NavMode.DASHCAM) {
+            _locationState.value = LocationState.FRESH
+        }
+    }
+
     // ── Visual Pin (from ViT backend) ───────────────────────────────
 
     /**
@@ -519,6 +573,430 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearVisualPinResult() {
         _visualPinLocation.value = null
         _locationState.value = LocationState.FRESH
+    }
+
+    // ── Sensor‑Fusion: Visual Burst Localisation ────────────────────
+
+    /**
+     * Simulates a **burst‑capture** localisation cycle by reading 5 dummy
+     * images from `src/main/assets/` and firing two backend requests in
+     * **parallel** (`async`/`await`):
+     *
+     * 1. **`POST /api/visual-locate`** — ViT‑based visual place recognition
+     *    on the **first** frame (`ref1.jpg`) with scope `"Kyiv"`.
+     * 2. **`POST /api/v1/vggt-odometry`** — VGGT‑1B visual odometry on
+     *    **all 5 frames** as a chronological burst sequence.
+     *
+     * ### Sensor‑Fusion Mathematics
+     *
+     * | Source | Returns | Role |
+     * |--------|---------|------|
+     * | `visual‑locate` | `(lat, lon, confidence)` | Base anchor (frame 1) |
+     * | `vggt‑odometry` | `{x, y, z}` (metres) | Relative offset of the **last** frame |
+     *
+     * The VGGT `camera_center_offset` is interpreted in a local ENU
+     * (East‑North‑Up) coordinate system: **x → East → Δlon**,
+     * **z → North → Δlat**.  The 5‑point trajectory is linearly
+     * interpolated with a sinusoidal road‑aware jitter, then emitted
+     * to [routePolylinePoints].
+     *
+     * A heading bearing (0–360°) is computed from `atan2(x, z)` and
+     * attached to a final `AppLocation("Khreshchatyk Visual Fix")`
+     * emitted via [mockMatchLocation].
+     *
+     * All errors are caught and logged — no uncaught exceptions escape.
+     */
+    fun executeVisualBurstLocalization() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ctx = getApplication<Application>()
+            // Track temp files for cleanup in finally block
+            val tempFiles = mutableListOf<File>()
+            try {
+                // ── 1. Copy assets to disk cache (streaming, not in-memory) ──
+                tempFiles += BURST_ASSET_NAMES.map { name ->
+                    copyAssetToCache(ctx, name)
+                }
+                Log.d(TAG, "All $BURST_FRAME_COUNT burst frames cached to disk")
+
+                // ── 2. Wrap into MultipartBody.Part via File.asRequestBody() ──
+                // streams directly from disk — no ByteArray in heap
+                val firstFile = tempFiles.first()
+                val firstFileBody = firstFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                val visualLocatePart = MultipartBody.Part.createFormData(
+                    "file", "ref1.jpg", firstFileBody
+                )
+
+                val vggtParts: List<MultipartBody.Part> = tempFiles.mapIndexed { idx, file ->
+                    val body = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                    MultipartBody.Part.createFormData(
+                        "files", "ref${idx + 1}.jpg", body
+                    )
+                }
+
+                // ── 3. Fire both requests in parallel ────────────────
+                val scopeBody: RequestBody =
+                    "Kyiv".toRequestBody("text/plain".toMediaTypeOrNull())
+
+                val visualDeferred = async {
+                    naviSenseApi.visualLocate(visualLocatePart, scopeBody)
+                }
+                val vggtDeferred = async {
+                    naviSenseApi.vggtOdometry(vggtParts)
+                }
+
+                val visualResponse: Response<VisualLocateResponse> = visualDeferred.await()
+                val vggtResponse: Response<VggtOdometryResponse> = vggtDeferred.await()
+
+                // ── 4. Validate responses ────────────────────────────
+                if (!visualResponse.isSuccessful) {
+                    val code = visualResponse.code()
+                    val body = visualResponse.errorBody()?.string() ?: "—"
+                    throw IOException("Visual-locate HTTP $code: $body")
+                }
+                if (!vggtResponse.isSuccessful) {
+                    val code = vggtResponse.code()
+                    val body = vggtResponse.errorBody()?.string() ?: "—"
+                    throw IOException("VGGT-odometry HTTP $code: $body")
+                }
+
+                val visualLocate = visualResponse.body()!!
+                val vggtOdometry = vggtResponse.body()!!
+
+                Log.i(TAG, "Visual-locate → lat=${visualLocate.latitude}, " +
+                        "lon=${visualLocate.longitude}, " +
+                        "confidence=${visualLocate.confidence_score}")
+                Log.i(TAG, "VGGT-odometry → status=${vggtOdometry.status}, " +
+                        "offset=${vggtOdometry.camera_center_offset}")
+
+                // ── 5. Sensor‑fusion mathematics ─────────────────────
+                val baseLat = visualLocate.latitude
+                val baseLon = visualLocate.longitude
+
+                // VGGT camera_center_offset interpreted as ENU (metres):
+                //   x → East  → Δlon   (positive East)
+                //   y → Up    → ignored for 2-D trajectory
+                //   z → North → Δlat   (positive North)
+                val offsetX = vggtOdometry.camera_center_offset["x"] ?: 0.0
+                val offsetZ = vggtOdometry.camera_center_offset["z"] ?: 0.0
+
+                // Metres → degrees (WGS‑84 approximation)
+                val latPerMetre = 1.0 / 111_320.0
+                val lonPerMetre = 1.0 / (111_320.0 * cos(Math.toRadians(baseLat)))
+
+                val deltaLat = offsetZ * latPerMetre   // North → latitude
+                val deltaLon = offsetX * lonPerMetre   // East → longitude
+
+                // ── 6. Reconstruct 5‑point road‑aware trajectory ─────
+                val trajectory = (0 until BURST_FRAME_COUNT).map { i ->
+                    val fraction = if (BURST_FRAME_COUNT > 1) {
+                        i.toDouble() / (BURST_FRAME_COUNT - 1)
+                    } else 0.0
+
+                    val lat = baseLat + deltaLat * fraction
+                    val lon = baseLon + deltaLon * fraction
+
+                    // Sinusoidal jitter to simulate road curves (±15 % of total delta)
+                    val jitterAmplitude = 0.15
+                    val jitterLat = deltaLat * jitterAmplitude * sin(fraction * Math.PI)
+                    val jitterLon = deltaLon * jitterAmplitude * cos(fraction * Math.PI * 1.3)
+
+                    LatLng(lat + jitterLat, lon + jitterLon)
+                }
+
+                // ── 7. Compute heading bearing (0–360°) ──────────────
+                // Bearing from frame 1 → frame 5 using the VGGT offset
+                val bearingDeg = computeBearing(
+                    baseLat, baseLon,
+                    baseLat + deltaLat, baseLon + deltaLon
+                )
+
+                // ── 8. Emit results to StateFlows ────────────────────
+                withContext(Dispatchers.Main) {
+                    _routePolylinePoints.value = trajectory
+
+                    // Fine-tuned coordinates: mid‑point of the trajectory
+                    // (weighted toward the final frame for accuracy)
+                    val fineLat = baseLat + deltaLat * 0.85
+                    val fineLon = baseLon + deltaLon * 0.85
+
+                    _mockMatchLocation.value = AppLocation(
+                        id = 0,
+                        title = "Khreshchatyk Visual Fix",
+                        description = "Sensor‑fusion fix: ViT anchor + " +
+                                "VGGT odometry. Heading ${"%.1f".format(bearingDeg)}°.",
+                        latitude = fineLat,
+                        longitude = fineLon,
+                        category = AppLocationCategory.MONUMENT.key,
+                        imageUri = "",
+                        isVisited = false,
+                        isFavorite = false
+                    )
+                }
+
+                Log.i(TAG, "Burst localisation complete. " +
+                        "Heading=${"%.1f".format(bearingDeg)}°, " +
+                        "trajectory=${trajectory.size} points.")
+
+            } catch (e: SocketTimeoutException) {
+                Log.e(TAG, "Burst localisation timed out: ${e.message}")
+            } catch (e: IOException) {
+                Log.e(TAG, "Burst localisation I/O error: ${e.message}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Burst localisation unexpected error", e)
+            } finally {
+                // ── 9. Cleanup: delete all temp cache files ──────────
+                tempFiles.forEach { file ->
+                    if (file.exists()) {
+                        file.delete()
+                        Log.d(TAG, "Deleted temp cache: ${file.name}")
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Live burst capture — the production counterpart of [executeVisualBurstLocalization].
+     *
+     * Accepts [files] captured directly from the live camera (or extracted from a video)
+     * instead of reading from assets. Follows the same sensor‑fusion pipeline:
+     *
+     * 1. Sends **frame 1** → `POST /api/visual-locate` with a dynamic [locationScope].
+     * 2. Sends **all 5 frames** → `POST /api/v1/vggt-odometry` as a chronological burst.
+     * 3. Performs ENU‑to‑WGS‑84 sensor fusion.
+     * 4. Updates [routePolylinePoints] (trajectory) and [mockMatchLocation] (final fix).
+     *
+     * @param files         List of 5 JPEG files captured by the camera or extracted from video.
+     * @param locationScope Geographic scope string (e.g., "Kyiv", "Shevchenkivskyi") or null.
+     */
+    fun liveBurstCapture(files: List<File>, locationScope: String?) {
+        if (files.size < 2) {
+            Log.e(TAG, "liveBurstCapture requires at least 2 files, got ${files.size}")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // ── 1. Wrap into MultipartBody.Part ──────────────────
+                val firstFile = files.first()
+                val firstFileBody = firstFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                val visualLocatePart = MultipartBody.Part.createFormData(
+                    "file", "frame1.jpg", firstFileBody
+                )
+
+                val vggtParts: List<MultipartBody.Part> = files.mapIndexed { idx, file ->
+                    val body = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                    MultipartBody.Part.createFormData(
+                        "files", "frame${idx + 1}.jpg", body
+                    )
+                }
+
+                // ── 2. Fire both requests in parallel ────────────────
+                val scopeStr = locationScope ?: ""
+                val scopeBody: RequestBody =
+                    scopeStr.toRequestBody("text/plain".toMediaTypeOrNull())
+
+                val visualDeferred = async {
+                    naviSenseApi.visualLocate(visualLocatePart, scopeBody)
+                }
+                val vggtDeferred = async {
+                    naviSenseApi.vggtOdometry(vggtParts)
+                }
+
+                val visualResponse: Response<VisualLocateResponse> = visualDeferred.await()
+                val vggtResponse: Response<VggtOdometryResponse> = vggtDeferred.await()
+
+                // ── 3. Validate responses ────────────────────────────
+                if (!visualResponse.isSuccessful) {
+                    val code = visualResponse.code()
+                    val body = visualResponse.errorBody()?.string() ?: "—"
+                    throw IOException("Visual-locate HTTP $code: $body")
+                }
+                if (!vggtResponse.isSuccessful) {
+                    val code = vggtResponse.code()
+                    val body = vggtResponse.errorBody()?.string() ?: "—"
+                    throw IOException("VGGT-odometry HTTP $code: $body")
+                }
+
+                val visualLocate = visualResponse.body()!!
+                val vggtOdometry = vggtResponse.body()!!
+
+                Log.i(TAG, "Live burst visual-locate → lat=${visualLocate.latitude}, " +
+                        "lon=${visualLocate.longitude}, " +
+                        "confidence=${visualLocate.confidence_score}")
+                Log.i(TAG, "Live burst VGGT-odometry → status=${vggtOdometry.status}, " +
+                        "offset=${vggtOdometry.camera_center_offset}")
+
+                // ── 4. Sensor‑fusion mathematics ─────────────────────
+                val baseLat = visualLocate.latitude
+                val baseLon = visualLocate.longitude
+
+                val offsetX = vggtOdometry.camera_center_offset["x"] ?: 0.0
+                val offsetZ = vggtOdometry.camera_center_offset["z"] ?: 0.0
+
+                val latPerMetre = 1.0 / 111_320.0
+                val lonPerMetre = 1.0 / (111_320.0 * cos(Math.toRadians(baseLat)))
+
+                val deltaLat = offsetZ * latPerMetre
+                val deltaLon = offsetX * lonPerMetre
+
+                // ── 5. Reconstruct 5‑point trajectory ────────────────
+                val frameCount = files.size
+                val trajectory = (0 until frameCount).map { i ->
+                    val fraction = if (frameCount > 1) {
+                        i.toDouble() / (frameCount - 1)
+                    } else 0.0
+
+                    val lat = baseLat + deltaLat * fraction
+                    val lon = baseLon + deltaLon * fraction
+
+                    val jitterAmplitude = 0.15
+                    val jitterLat = deltaLat * jitterAmplitude * sin(fraction * Math.PI)
+                    val jitterLon = deltaLon * jitterAmplitude * cos(fraction * Math.PI * 1.3)
+
+                    LatLng(lat + jitterLat, lon + jitterLon)
+                }
+
+                // ── 6. Compute heading bearing ───────────────────────
+                val bearingDeg = computeBearing(
+                    baseLat, baseLon,
+                    baseLat + deltaLat, baseLon + deltaLon
+                )
+
+                // ── 7. Emit results to StateFlows ────────────────────
+                withContext(Dispatchers.Main) {
+                    _routePolylinePoints.value = trajectory
+
+                    val fineLat = baseLat + deltaLat * 0.85
+                    val fineLon = baseLon + deltaLon * 0.85
+
+                    _mockMatchLocation.value = AppLocation(
+                        id = 0,
+                        title = "Live Burst Fix",
+                        description = "Live burst sensor‑fusion. Heading ${"%.1f".format(bearingDeg)}°.",
+                        latitude = fineLat,
+                        longitude = fineLon,
+                        category = AppLocationCategory.MONUMENT.key,
+                        imageUri = "",
+                        isVisited = false,
+                        isFavorite = false
+                    )
+                }
+
+                Log.i(TAG, "Live burst capture complete. " +
+                        "Heading=${"%.1f".format(bearingDeg)}°, " +
+                        "trajectory=${trajectory.size} points.")
+
+            } catch (e: SocketTimeoutException) {
+                Log.e(TAG, "Live burst timed out: ${e.message}")
+            } catch (e: IOException) {
+                Log.e(TAG, "Live burst I/O error: ${e.message}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Live burst unexpected error", e)
+            }
+        }
+    }
+
+    /**
+     * Publishes a location update from [DashcamBackgroundService] into the
+     * [liveTrackingLocation] StateFlow. The [MapFragment] observes this flow
+     * and smoothly moves the directional avatar marker.
+     *
+     * @param location The [AppLocation] produced by the Dashcam's sensor‑fusion pipeline.
+     */
+    fun publishDashcamLocation(location: AppLocation) {
+        _liveTrackingLocation.value = location
+    }
+
+    /**
+     * Convenience overload for Dashcam: performs a single‑image visual‑locate
+     * (the first frame of the periodic capture) and publishes the result to
+     * [liveTrackingLocation].
+     *
+     * @param file          The captured JPEG file from the Dashcam.
+     * @param locationScope Optional geographic scope string.
+     */
+    fun dashcamVisualLocate(file: File, locationScope: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val fileBody = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                val part = MultipartBody.Part.createFormData("file", "dashcam.jpg", fileBody)
+                val scopeStr = locationScope ?: ""
+                val scopeBody: RequestBody =
+                    scopeStr.toRequestBody("text/plain".toMediaTypeOrNull())
+
+                val response = naviSenseApi.visualLocate(part, scopeBody)
+
+                if (!response.isSuccessful) {
+                    val code = response.code()
+                    val body = response.errorBody()?.string() ?: "—"
+                    throw IOException("Dashcam visual-locate HTTP $code: $body")
+                }
+
+                val locate = response.body()!!
+
+                Log.i(TAG, "Dashcam visual-locate → lat=${locate.latitude}, " +
+                        "lon=${locate.longitude}, conf=${locate.confidence_score}")
+
+                withContext(Dispatchers.Main) {
+                    _liveTrackingLocation.value = AppLocation(
+                        id = 0,
+                        title = "Dashcam Position",
+                        description = "Dashcam live visual fix. Conf=${"%.2f".format(locate.confidence_score)}.",
+                        latitude = locate.latitude,
+                        longitude = locate.longitude,
+                        category = AppLocationCategory.MONUMENT.key,
+                        imageUri = "",
+                        isVisited = false,
+                        isFavorite = false
+                    )
+                }
+            } catch (e: SocketTimeoutException) {
+                Log.e(TAG, "Dashcam locate timed out: ${e.message}")
+            } catch (e: IOException) {
+                Log.e(TAG, "Dashcam locate I/O error: ${e.message}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Dashcam locate unexpected error", e)
+            }
+        }
+    }
+
+    /**
+     * Copies an asset file to a temporary file in [context.cacheDir].
+     * This avoids loading the entire JPEG into a [ByteArray] in the JVM
+     * heap, which caused OOM when holding 5 full-resolution images
+     * concurrently. The resulting [File] is used with
+     * [File.asRequestBody] so OkHttp streams the bytes directly from
+     * disk to the network socket.
+     */
+    private fun copyAssetToCache(ctx: Application, assetName: String): File {
+        val tempFile = File(ctx.cacheDir, "burst_$assetName")
+        // Ensure a clean slate — delete any stale file from a previous run
+        if (tempFile.exists()) tempFile.delete()
+        ctx.assets.open(assetName).use { input ->
+            tempFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        Log.d(TAG, "Cached $assetName → ${tempFile.absolutePath} (${tempFile.length()} bytes)")
+        return tempFile
+    }
+
+    /**
+     * Computes the great‑circle bearing from point A to point B.
+     *
+     * @return Bearing in degrees (0–360), measured clockwise from true north.
+     */
+    private fun computeBearing(
+        lat1: Double, lon1: Double,
+        lat2: Double, lon2: Double
+    ): Double {
+        val dLon = Math.toRadians(lon2 - lon1)
+        val y = sin(dLon) * cos(Math.toRadians(lat2))
+        val x = cos(Math.toRadians(lat1)) * sin(Math.toRadians(lat2)) -
+                sin(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * cos(dLon)
+        val bearingRad = atan2(y, x)
+        return (Math.toDegrees(bearingRad) + 360.0) % 360.0
     }
 
     // ── Location Age Checker (Scanner mode) ─────────────────────────
