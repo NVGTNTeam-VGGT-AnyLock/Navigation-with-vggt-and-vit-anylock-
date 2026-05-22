@@ -756,6 +756,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+<<<<<<< HEAD
      * Live burst capture — the production counterpart of [executeVisualBurstLocalization].
      *
      * Accepts [files] captured directly from the live camera (or extracted from a video)
@@ -962,6 +963,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+=======
+>>>>>>> origin/VGGT
      * Copies an asset file to a temporary file in [context.cacheDir].
      * This avoids loading the entire JPEG into a [ByteArray] in the JVM
      * heap, which caused OOM when holding 5 full-resolution images

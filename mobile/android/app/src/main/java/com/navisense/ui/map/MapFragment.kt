@@ -70,6 +70,7 @@ class MapFragment : Fragment() {
     /** Yellow marker at the end of the burst trajectory with heading rotation. */
     private var burstDirectionMarker: Marker? = null
 
+<<<<<<< HEAD
     /**
      * Live Dashcam tracking marker.  Updated in real‑time (every ~5 s) by
      * [MainViewModel.liveTrackingLocation].  The marker position is updated
@@ -80,6 +81,8 @@ class MapFragment : Fragment() {
     /** The last known Dashcam location, persisted across [map.clear] calls. */
     private var lastDashcamLocation: AppLocation? = null
 
+=======
+>>>>>>> origin/VGGT
     // Track filter button states
     private var visitedFilterActive = false
     private var favoritesFilterActive = false
