@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Import / mock ML dependencies ────────────────────────────────────
-USE_MOCK = True
+USE_MOCK = False
 try:
     from app.feature_extractor import get_extractor, get_vit_extractor
     from app.vector_db import get_vector_db, get_vit_vector_db
@@ -245,12 +245,6 @@ async def calibrate(file: UploadFile = File(...)):
 
 # ── VGGT-1B visual odometry (3D relative position) ────────────────────
 
-# When USE_MOCK=True, the vggt-odometry endpoint returns a simulated
-# camera-centre offset with random spatial deltas instead of running
-# the 1-billion-parameter VGGT-1B model.  This is the official workaround
-# for Windows CPU environments where PyTorch memory-mapping triggers
-# ``OSError (os error 1455)`` — see Section 12 for details.
-
 @app.post("/api/v1/vggt-odometry")
 async def vggt_odometry(files: list[UploadFile] = File(...)):
     """
@@ -263,27 +257,9 @@ async def vggt_odometry(files: list[UploadFile] = File(...)):
     camera centre of the **last** frame relative to the sequence's world
     coordinate system.
 
-    When ``USE_MOCK = True`` (default), the model is bypassed entirely and a
-    simulated response with random ``{x, y, z}`` offsets is returned instead.
-
     Returns:
         ``{"status": "success", "camera_center_offset": {"x": float, "y": float, "z": float}}``
     """
-    # ── 0. Mock bypass (no model loading / inference) ─────────────────
-    if USE_MOCK:
-        logger.info("USE_MOCK=True — returning simulated VGGT odometry offset")
-        import random
-        mock_offset = {
-            "x": round(random.uniform(-0.5, 0.5), 6),
-            "y": round(random.uniform(-0.3, 0.3), 6),
-            "z": round(random.uniform(-0.5, 0.5), 6),
-        }
-        logger.info(f"Simulated VGGT camera_centre offset: {mock_offset}")
-        return JSONResponse(content={
-            "status": "success",
-            "camera_center_offset": mock_offset,
-        })
-
     # ── 1. Validation ─────────────────────────────────────────────────
     if not files or len(files) < 2:
         raise HTTPException(
