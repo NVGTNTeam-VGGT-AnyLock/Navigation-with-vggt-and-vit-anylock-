@@ -2,7 +2,8 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 import logging
-from typing import Optional, List
+from typing import Optional, List, Annotated
+from pydantic import WithJsonSchema
 import numpy as np
 from PIL import Image
 import io
@@ -92,6 +93,13 @@ if USE_MOCK:
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
+# ── Workaround: force UploadFile to render as binary in OpenAPI schema ──
+# Pydantic v2 no longer emits "format: binary" for UploadFile, which causes
+# Swagger UI to show a text input instead of a file-upload button when used
+# inside List[UploadFile].  The annotated type below explicitly sets the
+# JSON schema so Swagger UI renders the correct multi-file picker.
+FixedUploadFile = Annotated[UploadFile, WithJsonSchema({"type": "string", "format": "binary"})]
+
 app = FastAPI(
     title="NaviSense Backend API",
     description="Visual positioning backend using ViT / DINOv2 and FAISS",
@@ -246,7 +254,7 @@ async def calibrate(file: UploadFile = File(...)):
 # ── VGGT-1B visual odometry (3D relative position) ────────────────────
 
 @app.post("/api/v1/vggt-odometry")
-async def vggt_odometry(files: list[UploadFile] = File(...)):
+async def vggt_odometry(files: List[FixedUploadFile] = File(...)):
     """
     Estimate the relative camera-centre offset from a **sequence of images**
     using the VGGT-1B model.
