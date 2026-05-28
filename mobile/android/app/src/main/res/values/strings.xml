@@ -200,4 +200,40 @@
     <!-- Mock Location 10: Novus – Lvivska Ploshcha -->
     <string name="mock_loc_10_title">Novus – Lvivska Ploshcha</string>
     <string name="mock_loc_10_desc">Modern supermarket with organic section and bakery.</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         PHASE 5/6: TRANSPORT & PEDESTRIAN MODE STRINGS
+         ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- Transport (Vehicle) Mode -->
+    <string name="tab_transport">Transport</string>
+    <string name="transport_current_position">Estimated Position</string>
+    <string name="transport_bearing_format">Bearing: %d°</string>
+    <string name="transport_bearing_unknown">Bearing: —</string>
+    <string name="transport_position_format">%1$.6f, %2$.6f</string>
+    <string name="transport_position_unknown">Position: —</string>
+    <string name="transport_stale_warning">⚠ Stale — scanning…</string>
+    <string name="transport_scanning">Scanning…</string>
+
+    <!-- Pedestrian (Walking) Mode -->
+    <string name="tab_pedestrian">Pedestrian</string>
+    <string name="pedestrian_locate_me">Locate Me</string>
+    <string name="pedestrian_scan_now">Scan!</string>
+    <string name="pedestrian_scanning">Scanning…</string>
+    <string name="pedestrian_scan_result">Last Scan Result</string>
+    <string name="pedestrian_position_format">📍 %1$.6f, %2$.6f</string>
+    <string name="pedestrian_position_unknown">Position: —</string>
+    <string name="pedestrian_bearing_format">🧭 Bearing: %d°</string>
+    <string name="pedestrian_bearing_unknown">Bearing: —</string>
+    <string name="pedestrian_scan_complete">Scan complete — %1$s, %2$s</string>
+
+    <!-- Mock / Development -->
+    <string name="mock_khreshchatyk">MOCK: KHRESHCHATYK</string>
+    <string name="mock_scan_triggered">Mock scan triggered</string>
+
+    <!-- Drawer Navigation -->
+    <string name="drawer_subtitle">Visual Navigation System</string>
+    <string name="drawer_section_modes">Navigation Modes</string>
+    <string name="drawer_section_manage">Location Management</string>
+    <string name="drawer_section_insights">Insights</string>
 </resources>

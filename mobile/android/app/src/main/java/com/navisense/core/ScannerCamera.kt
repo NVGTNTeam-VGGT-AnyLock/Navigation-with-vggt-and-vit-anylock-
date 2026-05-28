@@ -15,6 +15,13 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Controller responsible for capturing single high‑quality frames using CameraX,
@@ -50,6 +57,14 @@ class ScannerCamera(
     private var imageCapture: ImageCapture? = null
     private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
+    /**
+     * Guard flag to prevent the async [initializeCamera] callback from binding
+     * after [shutdown] has been called. This prevents the race where a pending
+     * [ProcessCameraProvider] future resolves after [onDestroyView] and binds
+     * to a stale (destroyed) lifecycle owner.
+     */
+    private var isShutdown = false
+
     /** Threshold for Laplacian variance below which an image is considered blurry. */
     private var blurThreshold: Double = DEFAULT_BLUR_THRESHOLD
 
@@ -73,6 +88,12 @@ class ScannerCamera(
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener(
             {
+                // ⚠️ Guard: if shutdown() was already called (e.g. during tab switch),
+                // the old lifecycleOwner is destroyed — do NOT bind.
+                if (isShutdown) {
+                    Log.w(tag, "initializeCamera — already shut down, skipping bind")
+                    return@addListener
+                }
                 try {
                     cameraProvider = cameraProviderFuture.get()
                     bindCameraUseCases()
@@ -89,6 +110,12 @@ class ScannerCamera(
      * Binds the Preview and ImageCapture use cases to the camera lifecycle.
      */
     private fun bindCameraUseCases() {
+        // Double-check shutdown guard (the listener was posted before shutdown was called)
+        if (isShutdown) {
+            Log.w(tag, "bindCameraUseCases — already shut down, skipping bind")
+            return
+        }
+
         val cameraProvider = cameraProvider ?: run {
             Log.e(tag, "CameraProvider is null, cannot bind use cases")
             return
@@ -131,6 +158,66 @@ class ScannerCamera(
         } catch (e: Exception) {
             Log.e(tag, "Failed to bind camera use cases", e)
             fileManagerService.logError("Failed to bind camera use cases: ${e.message}")
+        }
+    }
+
+    /**
+     * Re‑builds and re‑binds the **Preview** use case with the current
+     * [PreviewView]'s surface provider.
+     *
+     * Call this method when returning to a fragment from the backstack
+     * (e.g. after a tab switch) to ensure the live camera preview does
+     * not remain black.  A fresh [Preview] instance is created and bound
+     * together with the existing [ImageCapture] use case.
+     *
+     * This is safe to call multiple times.  It is a no‑op if the camera
+     * has been shut down or the [cameraProvider] is not yet initialised.
+     */
+    fun rebindPreview() {
+        if (isShutdown) {
+            Log.w(tag, "rebindPreview — already shut down, skipping")
+            return
+        }
+
+        val provider = cameraProvider
+        if (provider == null) {
+            // Camera provider not yet available — the init block's listener
+            // will bind when it resolves, so nothing to do here.
+            Log.d(tag, "rebindPreview — cameraProvider not ready yet, deferring")
+            return
+        }
+
+        val capture = imageCapture
+        if (capture == null) {
+            Log.w(tag, "rebindPreview — imageCapture not ready yet, skipping")
+            return
+        }
+
+        Log.d(tag, "rebindPreview — rebuilding Preview use case")
+
+        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+        // Create a brand‑new Preview use case and attach the current
+        // surface provider from the PreviewView.
+        val preview = Preview.Builder()
+            .build()
+
+        previewView?.let { viewFinder ->
+            preview.setSurfaceProvider(viewFinder.surfaceProvider)
+        }
+
+        try {
+            provider.unbindAll()
+            provider.bindToLifecycle(
+                lifecycleOwner,
+                cameraSelector,
+                preview,
+                capture
+            )
+            Log.d(tag, "rebindPreview — successfully rebound preview")
+        } catch (e: Exception) {
+            Log.e(tag, "rebindPreview — failed to rebind: ${e.message}", e)
+            fileManagerService.logError("rebindPreview failed: ${e.message}")
         }
     }
 
@@ -287,6 +374,139 @@ class ScannerCamera(
     }
 
     /**
+     * Captures a burst of [count] images sequentially, saving each to temporary storage
+     * via [FileManagerService], and returns the list of saved files.
+     *
+     * This is designed for the VGGT-1B visual-odometry pipeline, which requires a
+     * **sequence** of frames captured in quick succession. Blur detection is **skipped**
+     * during burst mode — the VGGT model is robust to moderate motion blur, and we
+     * prioritise capture speed over per-frame quality filtering.
+     *
+     * ## Threading
+     * Each individual capture uses CameraX's [cameraExecutor] (a single-thread
+     * background executor). The outer coroutine suspension bridges the callback-based
+     * [ImageCapture.takePicture] into a sequential `suspend` flow via
+     * [suspendCancellableCoroutine], ensuring thread-safe, non-blocking sequential
+     * execution.
+     *
+     * ## Cancellation
+     * If the calling coroutine is cancelled mid-burst, the current in-flight capture
+     * is aborted via [suspendCancellableCoroutine.invokeOnCancellation], and all
+     * files captured so far are cleaned up (deleted) to avoid orphaned temp files.
+     *
+     * ## Lifecycle safety
+     * The caller must ensure [shutdown] is called in `onDestroy` / `onStop`; this
+     * method will throw [IllegalStateException] if [imageCapture] is `null` (i.e.
+     * the camera has not been initialised or has been released).
+     *
+     * @param count      Number of frames to capture (must be >= 1).
+     * @param intervalMs Delay **between** successive captures, in milliseconds.
+     *                   Pass `0L` for the fastest possible back-to-back capture.
+     * @return List of [File] references, one per captured frame, saved in the
+     *         TempScans directory.
+     * @throws IllegalArgumentException if [count] < 1 or [intervalMs] < 0.
+     * @throws IllegalStateException if the camera is not initialised.
+     * @throws FileManagerService.InsufficientStorageException if free space is too low.
+     * @throws FileManagerService.FileManagerException on file I/O errors.
+     */
+    suspend fun captureBurst(count: Int, intervalMs: Long): List<File> {
+        require(count >= 1) { "count must be >= 1, got $count" }
+        require(intervalMs >= 0L) { "intervalMs must be >= 0, got $intervalMs" }
+
+        // Fast‑fail: if the camera has already been shut down (e.g. tab switch),
+        // throw CancellationException immediately rather than attempting to call
+        // takePicture on an unbound ImageCapture use case.
+        if (isShutdown) {
+            Log.w(tag, "captureBurst — camera already shut down, aborting")
+            throw CancellationException("Camera is shut down — cannot capture burst")
+        }
+
+        val imageCapture = imageCapture
+            ?: throw IllegalStateException("ImageCapture use case is not ready — camera may not be initialised")
+
+        return withContext(Dispatchers.IO) {
+            val files = mutableListOf<File>()
+            try {
+                for (i in 0 until count) {
+                    // Re‑check shutdown before each frame (a concurrent shutdown()
+                    // may have been called while we were sleeping between frames)
+                    if (isShutdown) {
+                        throw CancellationException("Camera shut down during burst at frame $i/$count")
+                    }
+
+                    // Delay between captures (skip delay before the first frame)
+                    if (i > 0 && intervalMs > 0L) {
+                        delay(intervalMs)
+                    }
+
+                    val file = suspendCancellableCoroutine<File> { continuation ->
+                        // Register cancellation handler to clean up in-flight capture
+                        continuation.invokeOnCancellation {
+                            Log.w(tag, "Burst capture cancelled at frame $i/$count")
+                        }
+
+                        imageCapture.takePicture(
+                            cameraExecutor,
+                            object : ImageCapture.OnImageCapturedCallback() {
+                                override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                                    try {
+                                        val bitmap = imageProxy.toBitmap()
+                                        imageProxy.close()
+
+                                        // Encode to JPEG and save — no blur check in burst mode
+                                        val jpegBytes = bitmap.toJpegBytes(quality = 85)
+                                        val savedFile = fileManagerService.saveImage(jpegBytes)
+                                        Log.d(
+                                            tag,
+                                            "Burst frame $i/$count saved: ${savedFile.name}"
+                                        )
+                                        continuation.resume(savedFile)
+                                    } catch (e: Exception) {
+                                        Log.e(
+                                            tag,
+                                            "Burst frame $i/$count processing failed",
+                                            e
+                                        )
+                                        continuation.resumeWithException(e)
+                                    }
+                                }
+
+                                override fun onError(exception: ImageCaptureException) {
+                                    Log.e(
+                                        tag,
+                                        "Burst capture frame $i/$count failed: ${exception.message}",
+                                        exception
+                                    )
+                                    fileManagerService.logError(
+                                        "Burst capture frame $i failed: ${exception.message}"
+                                    )
+                                    continuation.resumeWithException(exception)
+                                }
+                            }
+                        )
+                    }
+
+                    files.add(file)
+                }
+            } catch (e: Exception) {
+                // Clean up any files captured so far on failure
+                Log.e(tag, "Burst capture failed at frame ${files.size}/$count, cleaning up", e)
+                files.forEach { file ->
+                    try {
+                        fileManagerService.deleteImage(file)
+                    } catch (_: Exception) {
+                        // Best-effort cleanup
+                    }
+                }
+                throw e
+            }
+
+            Log.d(tag, "Burst capture completed: ${files.size} files saved")
+            return@withContext files
+        }
+    }
+
+    /**
      * Updates the blur‑detection threshold.
      * @param threshold new Laplacian variance threshold (lower values accept more blur).
      */
@@ -299,6 +519,8 @@ class ScannerCamera(
      * Must be called when the ScannerCamera is no longer needed (e.g., in onDestroy).
      */
     fun shutdown() {
+        Log.w(tag, "shutdown — unbinding all use cases")
+        isShutdown = true
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageCapture = null

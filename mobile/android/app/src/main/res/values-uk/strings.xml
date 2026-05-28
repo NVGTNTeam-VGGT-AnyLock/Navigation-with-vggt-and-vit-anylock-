@@ -133,19 +133,22 @@
     <!-- Analytics Screen -->
     <string name="analytics_title">Аналітика</string>
     <string name="analytics_summary">Зведення продуктивності</string>
-    <string name="category_distribution">Розподіл за категоріями</string>
     <string name="total_distance">Загальна відстань</string>
     <string name="time_saved">Збережений час</string>
     <string name="gps_stability">Стабільність GPS</string>
+    <string name="gps_stability_score">%d%%</string>
+    <string name="total_points">Усього точок</string>
+    <string name="category_distribution">Розподіл за категоріями</string>
     <string name="efficiency_metrics">Метрики ефективності</string>
     <string name="efficiency_subtitle">Відвідано vs Не відвідано</string>
     <string name="efficiency_visited">Відвідано</string>
     <string name="efficiency_not_visited">Не відвідано</string>
     <string name="efficiency_favorites">Обране</string>
-    <string name="status_histogram">Відвідані vs Обране</string>
     <string name="district_analysis">Аналіз за районами</string>
     <string name="visited_stats">Відвідано vs Не відвідано</string>
     <string name="total_locations">Усього локацій</string>
+    <string name="km_unit">км</string>
+    <string name="min_unit">хв</string>
 
     <!-- Toast Messages -->
     <string name="toast_no_internet">Немає підключення до інтернету. Перевірте мережу.</string>
@@ -197,4 +200,40 @@
     <!-- Mock Location 10: Novus – Lvivska Ploshcha -->
     <string name="mock_loc_10_title">Novus – Львівська площа</string>
     <string name="mock_loc_10_desc">Сучасний супермаркет з органічним відділом та пекарнею.</string>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         PHASE 5/6: TRANSPORT & PEDESTRIAN MODE STRINGS (UK)
+         ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- Transport (Vehicle) Mode -->
+    <string name="tab_transport">Транспорт</string>
+    <string name="transport_current_position">Передбачуване положення</string>
+    <string name="transport_bearing_format">Напрямок: %d°</string>
+    <string name="transport_bearing_unknown">Напрямок: —</string>
+    <string name="transport_position_format">%1$.6f, %2$.6f</string>
+    <string name="transport_position_unknown">Позиція: —</string>
+    <string name="transport_stale_warning">⚠ Застаріло — сканування…</string>
+    <string name="transport_scanning">Сканування…</string>
+
+    <!-- Pedestrian (Walking) Mode -->
+    <string name="tab_pedestrian">Пішохід</string>
+    <string name="pedestrian_locate_me">Визначити мене</string>
+    <string name="pedestrian_scan_now">Сканувати!</string>
+    <string name="pedestrian_scanning">Сканування…</string>
+    <string name="pedestrian_scan_result">Результат сканування</string>
+    <string name="pedestrian_position_format">📍 %1$.6f, %2$.6f</string>
+    <string name="pedestrian_position_unknown">Позиція: —</string>
+    <string name="pedestrian_bearing_format">🧭 Напрямок: %d°</string>
+    <string name="pedestrian_bearing_unknown">Напрямок: —</string>
+    <string name="pedestrian_scan_complete">Сканування завершено — %1$s, %2$s</string>
+
+    <!-- Mock / Development -->
+    <string name="mock_khreshchatyk">ТЕСТ: ХРЕЩАТИК</string>
+    <string name="mock_scan_triggered">Тестове сканування запущено</string>
+
+    <!-- Drawer Navigation -->
+    <string name="drawer_subtitle">Візуальна навігаційна система</string>
+    <string name="drawer_section_modes">Режими навігації</string>
+    <string name="drawer_section_manage">Керування локаціями</string>
+    <string name="drawer_section_insights">Аналітика</string>
 </resources>

@@ -64,18 +64,22 @@ class FileManagerService(private val context: Context) {
 
     /**
      * Reads a JPEG file and prepares it as a MultipartBody.Part for Retrofit upload.
-     * @param file the JPEG file to upload
+     *
+     * @param file      the JPEG file to upload
+     * @param fieldName the multipart form field name.
+     *                  Default is `"image"` (for ViT/DINOv2 endpoints).
+     *                  Use `"files"` for the VGGT-1B odometry endpoint.
      * @return MultipartBody.Part ready for network request
      * @throws FileManagerException if the file does not exist or cannot be read
      */
     @Throws(FileManagerException::class)
-    fun prepareImagePart(file: File): MultipartBody.Part {
+    fun prepareImagePart(file: File, fieldName: String = "image"): MultipartBody.Part {
         if (!file.exists() || !file.isFile) {
             throw FileManagerException("File does not exist or is not a regular file")
         }
         return try {
             val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
-            MultipartBody.Part.createFormData("image", file.name, requestFile)
+            MultipartBody.Part.createFormData(fieldName, file.name, requestFile)
         } catch (e: SecurityException) {
             throw FileManagerException("Security exception while preparing image part", e)
         } catch (e: IOException) {

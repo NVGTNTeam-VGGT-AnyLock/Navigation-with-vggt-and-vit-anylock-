@@ -1,5 +1,6 @@
 package com.navisense.core
 
+import com.navisense.model.CameraOffset
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response
@@ -43,6 +44,22 @@ data class VisualLocateResponse(
 )
 
 /**
+ * Response from the VGGT-1B visual odometry endpoint (`POST /api/v1/vggt-odometry`).
+ *
+ * References [CameraOffset] from the model package (which also provides
+ * bearing computation via [CameraOffset.toBearingDegrees]).
+ *
+ * @property status               Status string, typically "success".
+ * @property camera_center_offset The 3D metric translation vector [x, y, z]
+ *                                representing the relative camera-centre movement
+ *                                from the first to the last frame in the sequence.
+ */
+data class VggtOdometryResponse(
+    val status: String,
+    val camera_center_offset: CameraOffset
+)
+
+/**
  * Retrofit interface for communicating with the NaviSense backend API.
  * All endpoints are relative to the base URL configured via BuildConfig.BACKEND_URL.
  */
@@ -75,4 +92,24 @@ interface NaviSenseApi {
         @Part image: MultipartBody.Part,
         @Part("location_scope") locationScope: RequestBody
     ): Response<VisualLocateResponse>
+
+    /**
+     * Visual Odometry using **VGGT-1B**.
+     *
+     * Sends a **sequence** of 2+ JPEG images to compute the relative
+     * camera-centre offset between the first and last frame.
+     *
+     * **Critical:** Each part must be created with form field name `"files"`
+     * (not `"image"`) to match the backend signature:
+     * `files: List[FixedUploadFile] = File(...)`.
+     *
+     * @param files List of MultipartBody.Part, each created via
+     *              `FileManagerService.prepareImagePart(file, fieldName = "files")`.
+     * @return VggtOdometryResponse with status and camera_center_offset.
+     */
+    @Multipart
+    @POST("api/v1/vggt-odometry")
+    suspend fun vggtOdometry(
+        @Part files: List<MultipartBody.Part>
+    ): Response<VggtOdometryResponse>
 }

@@ -63,6 +63,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Database ────────────────────────────────────────────────────
     private val db = AppDatabase.getInstance(application)
+    private val deliveryHistoryDao = db.deliveryHistoryDao()
 
     // ── Repository (Room-backed, local-first) ───────────────────────
     private val repository: LocationRepository = RoomLocationRepositoryImpl(
