@@ -196,6 +196,33 @@ class FileManagerService(private val context: Context) {
     }
 
     /**
+     * Copies an asset file from the app's `assets/` folder to the app's
+     * internal cache directory, returning a [File] reference usable for upload.
+     *
+     * This is used by the **Test SLAM Fusion** flow to extract bundled mock
+     * images so they can be sent to the backend as multipart uploads.
+     *
+     * @param assetPath  Relative path under `assets/`, e.g. `"mock_frames/mock_frame_1.jpg"`.
+     * @return A [File] in the cache directory with the same name.
+     * @throws FileManagerException if the asset cannot be read or written.
+     */
+    @Throws(FileManagerException::class)
+    fun copyAssetToCache(assetPath: String): File {
+        return try {
+            val inputStream = context.assets.open(assetPath)
+            val fileName = assetPath.substringAfterLast('/')
+            val cacheFile = File(context.cacheDir, fileName)
+            FileOutputStream(cacheFile).use { output ->
+                inputStream.copyTo(output)
+            }
+            inputStream.close()
+            cacheFile
+        } catch (e: IOException) {
+            throw FileManagerException("Failed to copy asset '$assetPath' to cache", e)
+        }
+    }
+
+    /**
      * Generates a unique filename with prefix, timestamp, random suffix.
      */
     private fun generateUniqueFileName(): String {

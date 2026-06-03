@@ -98,6 +98,11 @@
     <string name="route_optimize_min">Need at least 3 waypoints to optimize.</string>
     <string name="route_empty">Please add at least one waypoint before starting navigation</string>
 
+    <!-- SLAM Fusion Test -->
+    <string name="test_slam_fusion">⚡ Test SLAM Fusion</string>
+    <string name="fusion_test_success">SLAM fusion test completed!</string>
+    <string name="fusion_test_failed">SLAM fusion failed: %s</string>
+
     <!-- Visual Search Screen -->
     <string name="visual_search_title">Find by Photo</string>
     <string name="visual_search_description">Upload or take a photo to find matching locations using AI visual search.</string>

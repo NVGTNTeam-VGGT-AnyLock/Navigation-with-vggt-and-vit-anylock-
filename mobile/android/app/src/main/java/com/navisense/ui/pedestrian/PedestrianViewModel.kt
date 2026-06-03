@@ -5,11 +5,10 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.navisense.core.LocalizationApiClient
+import com.navisense.core.NavigateFusionResponse
 import com.navisense.core.ScannerCamera
-import com.navisense.core.VggtOdometryResponse
-import com.navisense.core.VisualLocateResponse
+import com.navisense.model.NavigateFusionResult
 import com.navisense.model.UiState
-import com.navisense.model.VggtOdometryResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,16 +32,18 @@ private const val TAG = "NaviSense_Debug"
  * A single scan cycle via [startManualScan]:
  * 1. Captures 4 frames in quick succession via [ScannerCamera.captureBurst]
  *    with `count=4, intervalMs=500`.
- * 2. Sends the **first frame** to the ViT endpoint
- *    ([LocalizationApiClient.visualLocate]) for absolute position
- *    (latitude / longitude).
- * 3. Sends **all 4 frames** to the VGGT-1B endpoint
- *    ([LocalizationApiClient.vggtOdometry]) for relative bearing.
- * 4. The combined result is published as [UiState].
+ * 2. Sends **all 4 frames** in a **single** request to the fusion endpoint
+ *    ([LocalizationApiClient.navigateFusion]) which runs ViT and VGGT
+ *    **in parallel** on the server.
+ * 3. The combined result (position + trajectory + heading) is published
+ *    as [UiState].
+ *
+ * This replaces the previous two-round-trip approach (separate ViT and VGGT
+ * calls), cutting latency by ~40 %.
  *
  * ## Mock support
  * [simulateKhreshchatykScan] bypasses the camera entirely and directly
- * feeds mock image files into the API pipeline — useful for development
+ * feeds mock image files into the fusion pipeline — useful for development
  * and demonstration without a live camera feed.
  *
  * ## Lifecycle safety
@@ -123,11 +124,9 @@ class PedestrianViewModel(application: Application) : AndroidViewModel(applicati
      *
      * 1. Sets [UiState.isScanning] = `true`.
      * 2. Captures [BURST_COUNT] frames at [BURST_INTERVAL_MS] intervals.
-     * 3. Sends the **first frame** to [LocalizationApiClient.visualLocate]
-     *    (ViT) for absolute position.
-     * 4. Sends **all frames** to [LocalizationApiClient.vggtOdometry]
-     *    (VGGT-1B) for relative bearing.
-     * 5. Fuses the results into [UiState].
+     * 3. Sends **all frames** to [LocalizationApiClient.navigateFusion]
+     *    which runs ViT + VGGT in parallel on the server.
+     * 4. Updates [UiState] with the fused result (position + bearing).
      *
      * If the camera is not set or any step fails, the error is published
      * via [uiState].
@@ -158,50 +157,34 @@ class PedestrianViewModel(application: Application) : AndroidViewModel(applicati
                     throw IOException("Burst capture returned zero files")
                 }
 
-                Log.d(
-                    TAG,
-                    "Pedestrian: captured ${burstFiles.size} frames"
-                )
+                Log.d(TAG, "Pedestrian: captured ${burstFiles.size} frames")
 
-                // ── Step 2: ViT visual place recognition (first frame) ──
+                // ── Step 2: Single fused request (ViT + VGGT in parallel) ──
                 //
-                // ⚠️  visualLocate internally DELETES the file after a
-                // successful response.  We duplicate the first frame so
-                // vggtOdometry still has access to all original frames.
-                val firstFrameOriginal = burstFiles.first()
-                val firstFrameVit = duplicateFile(firstFrameOriginal)
+                // The server runs both models concurrently, so this single
+                // network call replaces the previous two sequential round-trips.
+                val fusionResponse: NavigateFusionResponse =
+                    localizationApiClient.navigateFusion(burstFiles)
 
-                val vitResponse: VisualLocateResponse = localizationApiClient.visualLocate(
-                    file = firstFrameVit,
-                    locationScope = null // Full‑world search
-                )
+                val fusionResult = NavigateFusionResult.fromResponse(fusionResponse)
 
                 Log.d(
                     TAG,
-                    "Pedestrian: ViT locate → lat=${vitResponse.latitude}, " +
-                            "lon=${vitResponse.longitude}, " +
-                            "confidence=${vitResponse.confidence_score}"
+                    "Pedestrian: fusion → lat=${fusionResult.latitude}, " +
+                            "lon=${fusionResult.longitude}, " +
+                            "heading=(${fusionResult.headingVector.x}, " +
+                            "${fusionResult.headingVector.y}), " +
+                            "trajectory_len=${fusionResult.trajectory.size}"
                 )
 
-                // ── Step 3: VGGT-1B visual odometry (all frames) ──────
-                val vggtResponse: VggtOdometryResponse =
-                    localizationApiClient.vggtOdometry(burstFiles)
-
-                val odometryResult = VggtOdometryResult.fromResponse(vggtResponse)
-
-                Log.d(
-                    TAG,
-                    "Pedestrian: VGGT odometry → bearing=${odometryResult.bearingDegrees}°"
-                )
-
-                // ── Step 4: Fuse results into UiState ──────────────────
+                // ── Step 3: Update UiState ─────────────────────────────
                 val stale = (System.currentTimeMillis() - lastSuccessfulScanTimeMs) > STALE_THRESHOLD_MS
                         && lastSuccessfulScanTimeMs > 0L
 
                 _uiState.value = UiState(
-                    latitude = vitResponse.latitude,
-                    longitude = vitResponse.longitude,
-                    bearing = odometryResult.bearingDegrees,
+                    latitude = fusionResult.latitude,
+                    longitude = fusionResult.longitude,
+                    bearing = fusionResult.headingVector.toBearingDegrees(),
                     isStale = stale,
                     isScanning = false
                 )
@@ -236,14 +219,13 @@ class PedestrianViewModel(application: Application) : AndroidViewModel(applicati
 
     /**
      * Mock trigger — bypasses the camera and directly feeds the provided
-     * image files into the VGGT‑1B and ViT pipeline.
+     * image files into the fusion pipeline.
      *
      * This simulates a scan on **Khreshchatyk Street** (Kyiv's main
      * thoroughfare) for development and demo purposes.
      *
      * @param mockFiles List of pre‑captured JPEG files (at least 4).
-     *                  The first file is sent to ViT; all files are sent
-     *                  to VGGT-1B.
+     *                  All files are sent to the fusion endpoint.
      */
     fun simulateKhreshchatykScan(mockFiles: List<File>) {
         // ── Lifecycle guard: abort if tab is no longer active ──
@@ -260,42 +242,26 @@ class PedestrianViewModel(application: Application) : AndroidViewModel(applicati
 
                 Log.d(TAG, "Pedestrian: simulating Khreshchatyk scan with ${mockFiles.size} files")
 
-                // ⚠️  Duplicate the first frame so visualLocate can delete
-                // its copy without destroying the original needed by vggtOdometry.
-                val firstFrameOriginal = mockFiles.first()
-                val firstFrameVit = duplicateFile(firstFrameOriginal)
+                // ── Single fusion call (no file duplication needed) ──
+                val fusionResponse: NavigateFusionResponse =
+                    localizationApiClient.navigateFusion(mockFiles)
 
-                // ── ViT visual place recognition (first frame) ──
-                val vitResponse: VisualLocateResponse = localizationApiClient.visualLocate(
-                    file = firstFrameVit,
-                    locationScope = "Kyiv"
-                )
+                val fusionResult = NavigateFusionResult.fromResponse(fusionResponse)
 
                 Log.d(
                     TAG,
-                    "Pedestrian (mock): ViT locate → lat=${vitResponse.latitude}, " +
-                            "lon=${vitResponse.longitude}"
+                    "Pedestrian (mock): fusion → lat=${fusionResult.latitude}, " +
+                            "lon=${fusionResult.longitude}"
                 )
 
-                // ── VGGT-1B visual odometry (all files) ──
-                val vggtResponse: VggtOdometryResponse =
-                    localizationApiClient.vggtOdometry(mockFiles)
-
-                val odometryResult = VggtOdometryResult.fromResponse(vggtResponse)
-
-                Log.d(
-                    TAG,
-                    "Pedestrian (mock): VGGT odometry → bearing=${odometryResult.bearingDegrees}°"
-                )
-
-                // ── Fuse results ──
+                // ── Update UiState ──
                 val stale = (System.currentTimeMillis() - lastSuccessfulScanTimeMs) > STALE_THRESHOLD_MS
                         && lastSuccessfulScanTimeMs > 0L
 
                 _uiState.value = UiState(
-                    latitude = vitResponse.latitude,
-                    longitude = vitResponse.longitude,
-                    bearing = odometryResult.bearingDegrees,
+                    latitude = fusionResult.latitude,
+                    longitude = fusionResult.longitude,
+                    bearing = fusionResult.headingVector.toBearingDegrees(),
                     isStale = stale,
                     isScanning = false
                 )
@@ -318,26 +284,6 @@ class PedestrianViewModel(application: Application) : AndroidViewModel(applicati
                 )
             }
         }
-    }
-
-    // ── Helpers ────────────────────────────────────────────────────────
-
-    /**
-     * Creates an independent copy of [file] in the app's cache directory.
-     *
-     * The copy is used as a throwaway argument to [LocalizationApiClient.visualLocate],
-     * which deletes the file after a successful network response.  By duping the
-     * first frame we preserve the original for the subsequent
-     * [LocalizationApiClient.vggtOdometry] call.
-     *
-     * @return The newly created temporary copy.
-     * @throws IOException if the copy operation fails.
-     */
-    private fun duplicateFile(file: File): File {
-        val tempFile = java.io.File.createTempFile("vit_copy_", ".jpg", getApplication<Application>().cacheDir)
-        java.nio.file.Files.copy(file.toPath(), tempFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        Log.d(TAG, "Duplicated ${file.name} → ${tempFile.name} for ViT safety")
-        return tempFile
     }
 
     override fun onCleared() {

@@ -47,4 +47,7 @@
     <color name="chart_not_visited">#FFFB7185</color>
     <color name="chart_favorites">#FFF59E0B</color>
     <color name="chart_others">#FF94A3B8</color>
+
+    <!-- SLAM Fusion colours -->
+    <color name="fusion_polyline">#FF4CAF50</color>
 </resources>

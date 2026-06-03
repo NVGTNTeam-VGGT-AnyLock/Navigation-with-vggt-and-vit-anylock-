@@ -10,8 +10,11 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.Tasks
+import com.navisense.core.FileManagerService
 import com.navisense.core.LocalizationApiClient
+import com.navisense.core.NavigateFusionResponse
 import com.navisense.core.VisualLocateResponse
+import com.navisense.ui.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -469,6 +472,80 @@ class VisualSearchViewModel(application: Application) : AndroidViewModel(applica
                 val message = e.message ?: "Unexpected error during visual search"
                 Log.e(NAVISENSE_DEBUG_TAG, "Visual locate crashed: $message", e)
                 _visualLocateError.value = message
+            }
+        }
+    }
+
+    /**
+     * Performs the **Test SLAM Fusion** flow.
+     *
+     * Reads 4 mock frames from `assets/mock_frames/`, copies them to cache,
+     * calls the fused navigation endpoint (`/api/v1/navigate-fusion`) via
+     * [LocalizationApiClient.navigateFusion], and stores the result in
+     * [MainViewModel.fusionResult] so the [MapFragment] can render it.
+     *
+     * ## States emitted via [fusionTestError]
+     * - `null` while executing (loading).
+     * - Error message string on failure.
+     * - Empty string `""` on success (cleared after 5 seconds).
+     */
+    private val _fusionTestError = MutableStateFlow<String?>(null)
+    val fusionTestError: StateFlow<String?> = _fusionTestError.asStateFlow()
+
+    private val _fusionTestLoading = MutableStateFlow(false)
+    val fusionTestLoading: StateFlow<Boolean> = _fusionTestLoading.asStateFlow()
+
+    /**
+     * Called by [VisualSearchFragment] when the user taps "Test SLAM Fusion".
+     *
+     * @param mainViewModel The shared [MainViewModel] used to store the fusion result.
+     */
+    fun performFusionTest(mainViewModel: MainViewModel) {
+        viewModelScope.launch {
+            _fusionTestLoading.value = true
+            _fusionTestError.value = null
+
+            Log.d(NAVISENSE_DEBUG_TAG, "performFusionTest: starting SLAM fusion test")
+
+            try {
+                // 1. Copy 4 mock assets from assets/mock_frames/ to cache
+                val fileManagerService = FileManagerService(getApplication())
+                val frameFiles = (1..4).map { i ->
+                    fileManagerService.copyAssetToCache("mock_frames/mock_frame_$i.jpg")
+                }
+
+                // 2. Call the backend
+                val response: NavigateFusionResponse = withContext(Dispatchers.IO) {
+                    localizationApiClient.navigateFusion(frameFiles)
+                }
+
+                // 3. Convert to domain result and store in MainViewModel
+                val fusionResult = MainViewModel.FusionResult(
+                    latitude = response.current_location.lat,
+                    longitude = response.current_location.lng,
+                    trajectory = response.trajectory,
+                    headingVector = response.heading_vector
+                )
+                mainViewModel.setFusionResult(fusionResult)
+
+                // 4. Clean up cache files
+                frameFiles.forEach { it.delete() }
+
+                Log.d(
+                    NAVISENSE_DEBUG_TAG,
+                    "Fusion test success: pos=${fusionResult.latitude},${fusionResult.longitude} " +
+                            "trajectory=${fusionResult.trajectory.size}pts heading=(${fusionResult.headingVector.x},${fusionResult.headingVector.y})"
+                )
+
+                // Signal success (empty string)
+                _fusionTestError.value = ""
+
+            } catch (e: Exception) {
+                val message = e.message ?: "Unknown fusion test error"
+                Log.e(NAVISENSE_DEBUG_TAG, "Fusion test failed: $message", e)
+                _fusionTestError.value = message
+            } finally {
+                _fusionTestLoading.value = false
             }
         }
     }

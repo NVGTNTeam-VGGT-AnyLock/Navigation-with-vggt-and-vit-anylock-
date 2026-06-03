@@ -2,7 +2,8 @@
 
 > **Maintainer:** Android Team  
 > **Audience:** All developers (frontend, backend, database)  
-> **Last Updated:** 2026-05-01  
+> **Last Updated:** 2026-06-03  
+
 > **App Version:** 1.0.0
 
 ---
@@ -901,6 +902,8 @@ The complete pipeline exists but is disconnected:
 | `GET` | `/api/v1/health` | Health check → `{"status": "ok"}` |
 | `POST` | `/api/v1/position` | Upload JPEG (max 5 MB) → returns `{latitude, longitude, floor, confidence, nearest_landmarks}` |
 | `POST` | `/api/v1/calibrate` | Placeholder for blur-detection calibration |
+| `POST` | `/api/v1/navigate-fusion` | Upload 4 sequential JPEG frames (multipart form with fields `file1`–`file4`) → returns fusion result (ViT absolute position + VGGT odometry). **Response format:** `{"current_location": {"lat": 50.4501, "lng": 30.5234}, "trajectory": [{"dx": 0.12, "dy": 0.0, "dz": 0.0}], "heading_vector": 85.5}` |
+
 
 ### ML Pipeline
 

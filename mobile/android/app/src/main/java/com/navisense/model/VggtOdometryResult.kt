@@ -93,3 +93,85 @@ data class CameraOffset(
         return (degrees + 360.0) % 360.0
     }
 }
+
+// ── Fusion endpoint domain models ─────────────────────────────────────
+
+/**
+ * A single point in the 3D trajectory returned by VGGT-1B.
+ *
+ * Each point represents the camera-centre displacement **relative to the
+ * first frame** in the image sequence.
+ *
+ * @property dx Lateral displacement (positive = rightward).
+ * @property dy Vertical displacement (positive = upward).
+ * @property dz Forward displacement (positive = forward).
+ */
+data class TrajectoryPoint(
+    val dx: Double,
+    val dy: Double,
+    val dz: Double
+)
+
+/**
+ * Normalised 2D heading vector on the ground plane.
+ *
+ * Derived from the last frame's forward-facing direction in the
+ * VGGT-1B camera coordinate system (XZ plane), mapped to (x, y).
+ *
+ * @property x Lateral component (positive = rightward).
+ * @property y Forward/depth component (positive = forward).
+ */
+data class HeadingVector(
+    val x: Double,
+    val y: Double
+) {
+    /**
+     * Computes the bearing in degrees from the heading vector.
+     *
+     * Uses [atan2] where:
+     *   - `x` = lateral component
+     *   - `y` = forward component (mapped from camera-space Z)
+     *
+     * @return bearing in degrees, normalized to [0, 360).
+     */
+    fun toBearingDegrees(): Double {
+        val radians = kotlin.math.atan2(x, y)
+        val degrees = Math.toDegrees(radians)
+        return (degrees + 360.0) % 360.0
+    }
+}
+
+/**
+ * Domain-level result from the fused navigation endpoint.
+ *
+ * Combines the absolute position from ViT with the trajectory
+ * and heading from VGGT-1B into a single navigation data object.
+ *
+ * @param latitude       WGS‑84 latitude from ViT visual place recognition.
+ * @param longitude      WGS‑84 longitude from ViT visual place recognition.
+ * @param trajectory     Per-frame 3D displacements from VGGT-1B.
+ * @param headingVector  Normalised 2D forward direction from VGGT-1B.
+ */
+data class NavigateFusionResult(
+    val latitude: Double,
+    val longitude: Double,
+    val trajectory: List<TrajectoryPoint>,
+    val headingVector: HeadingVector
+) {
+    companion object {
+        /**
+         * Factory that converts a raw [NavigateFusionResponse] into a
+         * domain-level [NavigateFusionResult].
+         */
+        fun fromResponse(
+            response: com.navisense.core.NavigateFusionResponse
+        ): NavigateFusionResult {
+            return NavigateFusionResult(
+                latitude = response.current_location.lat,
+                longitude = response.current_location.lng,
+                trajectory = response.trajectory,
+                headingVector = response.heading_vector
+            )
+        }
+    }
+}

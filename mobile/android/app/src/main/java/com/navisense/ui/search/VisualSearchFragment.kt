@@ -170,6 +170,7 @@ class VisualSearchFragment : Fragment() {
         // Set up click listeners
         binding.btnCapture.setOnClickListener { capturePhoto() }
         binding.btnUploadPhoto.setOnClickListener { pickFromGallery() }
+        binding.btnTestSlamFusion.setOnClickListener { onTestSlamFusion() }
 
         // Check BOTH camera and location permissions before initialising preview
         checkPermissionsAndInitCamera()
@@ -725,6 +726,58 @@ class VisualSearchFragment : Fragment() {
     private fun navigateToMap() {
         Log.d(NAVISENSE_DEBUG_TAG, "Navigating to MapFragment")
         findNavController().navigate(R.id.mapFragment)
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  Test SLAM Fusion
+    // ═════════════════════════════════════════════════════════════════
+
+    /**
+     * Called when the user taps the "Test SLAM Fusion" button.
+     *
+     * Shows loading, calls [VisualSearchViewModel.performFusionTest] with
+     * the shared [viewModel] (MainViewModel), and on success navigates to
+     * the Map tab so the user can see the green trajectory and arrow marker.
+     */
+    private fun onTestSlamFusion() {
+        Log.d(NAVISENSE_DEBUG_TAG, "Test SLAM Fusion button tapped")
+
+        // Hide placeholder if visible
+        binding.tvCameraPlaceholder.visibility = View.GONE
+
+        showLoading(getString(R.string.analysing_visual_data))
+
+        visualSearchViewModel.performFusionTest(viewModel)
+
+        // Observe the fusion test result
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    visualSearchViewModel.fusionTestError.collect { error ->
+                        if (error == null) return@collect // Still loading
+
+                        hideLoading()
+
+                        if (error.isEmpty()) {
+                            // Success — navigate to map
+                            Toast.makeText(
+                                requireContext(),
+                                R.string.fusion_test_success,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            navigateToMap()
+                        } else {
+                            // Failure — show error
+                            Toast.makeText(
+                                requireContext(),
+                                getString(R.string.fusion_test_failed, error),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════

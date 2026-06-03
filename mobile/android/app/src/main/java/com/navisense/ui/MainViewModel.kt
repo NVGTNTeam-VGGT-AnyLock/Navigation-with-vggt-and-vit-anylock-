@@ -14,8 +14,10 @@ import com.navisense.data.RoomLocationRepositoryImpl
 import com.navisense.data.local.AppDatabase
 import com.navisense.model.AppLocation
 import com.navisense.model.AppLocationCategory
+import com.navisense.model.HeadingVector
 import com.navisense.model.LocationState
 import com.navisense.model.NavMode
+import com.navisense.model.TrajectoryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -166,6 +168,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ── State: Visual Pin (from ViT backend) ──────────────────────
     private val _visualPinLocation = MutableStateFlow<AppLocation?>(null)
     val visualPinLocation: StateFlow<AppLocation?> = _visualPinLocation.asStateFlow()
+
+    // ── State: Fusion Navigation Result (SLAM test) ─────────────────
+    /**
+     * Result data from the fused navigation endpoint (`/api/v1/navigate-fusion`).
+     *
+     * Holds everything needed to render the SLAM pipeline output on the map:
+     * - [latitude], [longitude]: the absolute position from ViT.
+     * - [trajectory]: per-frame 3D displacement from VGGT.
+     * - [headingVector]: 2D forward direction.
+     */
+    data class FusionResult(
+        val latitude: Double,
+        val longitude: Double,
+        val trajectory: List<TrajectoryPoint>,
+        val headingVector: HeadingVector
+    )
+
+    private val _fusionResult = MutableStateFlow<FusionResult?>(null)
+    val fusionResult: StateFlow<FusionResult?> = _fusionResult.asStateFlow()
+
+    fun setFusionResult(result: FusionResult) {
+        _fusionResult.value = result
+    }
+
+    fun clearFusionResult() {
+        _fusionResult.value = null
+    }
 
     // ── Analytics (computed) ───────────────────────────────────────
     data class AnalyticsData(

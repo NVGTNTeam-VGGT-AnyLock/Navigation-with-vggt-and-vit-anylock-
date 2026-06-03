@@ -1,6 +1,8 @@
 package com.navisense.core
 
 import com.navisense.model.CameraOffset
+import com.navisense.model.HeadingVector
+import com.navisense.model.TrajectoryPoint
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response
@@ -59,6 +61,38 @@ data class VggtOdometryResponse(
     val camera_center_offset: CameraOffset
 )
 
+// ── Fusion endpoint DTOs ─────────────────────────────────────────────
+
+/**
+ * WGS‑84 location estimated by the ViT model via FAISS search.
+ *
+ * @property lat WGS‑84 latitude.
+ * @property lng WGS‑84 longitude.
+ */
+data class CurrentLocation(
+    val lat: Double,
+    val lng: Double
+)
+
+/**
+ * Combined response from the fusion endpoint (`POST /api/v1/navigate-fusion`).
+ *
+ * This single response contains everything needed for navigation:
+ * - [currentLocation]: absolute position on the map (from ViT).
+ * - [trajectory]: per-frame 3D camera-centre displacement (from VGGT).
+ * - [headingVector]: normalised 2D forward direction (from VGGT).
+ *
+ * @property currentLocation The estimated WGS‑84 coordinates.
+ * @property trajectory      List of per-frame 3D displacements relative to
+ *                           the first frame.
+ * @property headingVector   Normalised 2D direction vector on the ground plane.
+ */
+data class NavigateFusionResponse(
+    val current_location: CurrentLocation,
+    val trajectory: List<TrajectoryPoint>,
+    val heading_vector: HeadingVector
+)
+
 /**
  * Retrofit interface for communicating with the NaviSense backend API.
  * All endpoints are relative to the base URL configured via BuildConfig.BACKEND_URL.
@@ -112,4 +146,27 @@ interface NaviSenseApi {
     suspend fun vggtOdometry(
         @Part files: List<MultipartBody.Part>
     ): Response<VggtOdometryResponse>
+
+    /**
+     * **Fused visual navigation** — absolute position (ViT) + visual odometry
+     * (VGGT-1B) in a single request.
+     *
+     * Sends **4 images** as a single multipart request. The backend runs
+     * both models in parallel and returns a combined result.
+     *
+     * **Critical:** Each part must be created with form field name `"files"`
+     * to match the backend signature:
+     * `files: List[FixedUploadFile] = File(...)`.
+     *
+     * @param files List of MultipartBody.Part (at least 2, 4 recommended),
+     *              each created via
+     *              `FileManagerService.prepareImagePart(file, fieldName = "files")`.
+     * @return NavigateFusionResponse with current_location, trajectory,
+     *         and heading_vector.
+     */
+    @Multipart
+    @POST("api/v1/navigate-fusion")
+    suspend fun navigateFusion(
+        @Part files: List<MultipartBody.Part>
+    ): Response<NavigateFusionResponse>
 }

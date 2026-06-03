@@ -1,0 +1,19 @@
+# Project Context: NaviSense
+Visual SLAM mobile navigation system.
+
+## Tech Stack
+* Backend: Python 3.12 (isolated venv), FastAPI, asyncio.
+* ML Models: PyTorch (CUDA 12.1), ViT + FAISS (absolute positioning), VGGT (visual odometry).
+* Client: Native Android (Kotlin, MVVM, Retrofit).
+
+## Architecture & Code Guidelines
+* Storage: Never store images as BLOBs in the database. Save images to local disk folders and store only relative paths in the DB/JSON.
+* ML Pipeline Execution: ViT and VGGT MUST be executed sequentially (ViT first, then VGGT) with `torch.cuda.empty_cache()` called in between. Never run heavy ML models concurrently to prevent CUDA Out-Of-Memory errors.
+* Error Handling: Always provide robust fallback logic (Mock implementations) if C++ or ML dependencies fail to load.
+* Android: Ensure strict typing in ViewModels.
+
+
+## Documentation Maintenance (Single Source of Truth)
+* Synchronous Updates: After successfully fixing a bug, resolving a blocker, or writing new code, you MUST automatically analyze how this changes the system.
+* Update Architecture: Promptly update the `Project_Context.md` (or the relevant architecture markdown file) to reflect the newly resolved issues, current architecture, and updated status (e.g., moving an item from "Blocker" to "Done"). 
+* Rule of thumb: Never leave the documentation in a stale state after modifying the codebase.

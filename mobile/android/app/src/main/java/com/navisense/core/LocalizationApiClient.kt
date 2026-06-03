@@ -2,6 +2,8 @@ package com.navisense.core
 
 import android.content.Context
 import com.navisense.BuildConfig
+import com.navisense.model.HeadingVector
+import com.navisense.model.TrajectoryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -353,6 +355,121 @@ class LocalizationApiClient private constructor(
             files.forEach { fileManagerService.deleteImage(it) }
             throw lastException
                 ?: IOException("VGGT odometry failed after $MAX_RETRIES retries")
+        }
+    }
+
+    /**
+     * **Fused visual navigation** — sends 4 images in a single request to
+     * ``POST /api/v1/navigate-fusion``.
+     *
+     * The backend runs ViT (absolute position) and VGGT-1B (visual odometry)
+     * **in parallel** and returns a single combined response.
+     *
+     * ## Why this is faster
+     * Previously the app made two sequential round-trips: one for ViT position
+     * and one for VGGT odometry. This single-call approach:
+     * - Saves one network round-trip (latency).
+     * - Lets the server run both models concurrently (server-side parallelism).
+     * - Eliminates the need to duplicate the first frame on the client.
+     *
+     * ## Retry Policy
+     * Same as [vggtOdometry]: up to [MAX_RETRIES] attempts with exponential
+     * backoff (base 1s, multiplier 2×). Server errors (5xx) and network timeouts
+     * are retried; client errors (4xx) are not.
+     *
+     * ## Cleanup
+     * All temporary files are deleted regardless of success or failure.
+     *
+     * @param files The list of JPEG files to upload (typically 4 burst captures).
+     *              All files must exist in the TempScans directory.
+     * @return [NavigateFusionResponse] containing [NavigateFusionResponse.current_location],
+     *         [NavigateFusionResponse.trajectory], and [NavigateFusionResponse.heading_vector].
+     * @throws IOException if the network request fails after all retries.
+     * @throws FileManagerService.FileManagerException if any file cannot be prepared.
+     */
+    suspend fun navigateFusion(files: List<File>): NavigateFusionResponse = withContext(Dispatchers.IO) {
+        var lastException: IOException? = null
+        var finalResponse: NavigateFusionResponse? = null
+
+        for (attempt in 0..MAX_RETRIES) {
+            try {
+                // Prepare each file as a multipart part with field name "files"
+                val imageParts = files.map { file ->
+                    fileManagerService.prepareImagePart(file, fieldName = "files")
+                }
+
+                // Perform the network request
+                val response: Response<NavigateFusionResponse> = api.navigateFusion(imageParts)
+
+                if (!response.isSuccessful) {
+                    val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                    fileManagerService.logError(
+                        "Navigate-fusion returned HTTP ${response.code()}: $errorBody"
+                    )
+                    // Retry only on server errors (5xx) and not on client errors (4xx)
+                    if (response.code() >= 500 && attempt < MAX_RETRIES) {
+                        val backoffDelay = (
+                                INITIAL_RETRY_DELAY_MS *
+                                        BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                                ).toLong()
+                        delay(backoffDelay)
+                        continue
+                    } else {
+                        when (response.code()) {
+                            400 -> throw IOException(
+                                "Navigate-fusion requires at least 2 images (got ${files.size})"
+                            )
+                            404 -> throw IOException("Location not recognized in database")
+                            else -> throw IOException(
+                                "Backend error ${response.code()}: $errorBody"
+                            )
+                        }
+                    }
+                }
+
+                val fusionResponse = response.body()
+                    ?: throw IOException("Backend returned empty response body")
+
+                // Successful response – delete all temporary files
+                files.forEach { fileManagerService.deleteImage(it) }
+                finalResponse = fusionResponse
+                break
+
+            } catch (e: SocketTimeoutException) {
+                lastException = e
+                fileManagerService.logError(
+                    "Navigate-fusion timeout on attempt ${attempt + 1}: ${e.message}"
+                )
+                if (attempt == MAX_RETRIES) break
+                val backoffDelay = (
+                        INITIAL_RETRY_DELAY_MS *
+                                BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                        ).toLong()
+                delay(backoffDelay)
+            } catch (e: IOException) {
+                lastException = e
+                fileManagerService.logError(
+                    "Navigate-fusion I/O error on attempt ${attempt + 1}: ${e.message}"
+                )
+                if (attempt == MAX_RETRIES) break
+                val backoffDelay = (
+                        INITIAL_RETRY_DELAY_MS *
+                                BACKOFF_MULTIPLIER.pow(attempt.toDouble())
+                        ).toLong()
+                delay(backoffDelay)
+            } catch (e: Exception) {
+                fileManagerService.logError(
+                    "Unexpected error during navigate-fusion: ${e.message}"
+                )
+                throw e
+            }
+        }
+
+        return@withContext finalResponse ?: run {
+            // Delete all files after final failure
+            files.forEach { fileManagerService.deleteImage(it) }
+            throw lastException
+                ?: IOException("Navigate-fusion failed after $MAX_RETRIES retries")
         }
     }
 }

@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -20,15 +21,24 @@ logger = logging.getLogger(__name__)
 
 # ── Import / mock ML dependencies ────────────────────────────────────
 USE_MOCK = False
+
+# VGGT-1B has NO dependency on FAISS – import separately so a FAISS
+# DLL load error does not poison the VGGT singleton.
+_VGGT_AVAILABLE = False
+try:
+    from app.vggt_processor import VGGTProcessor
+    _VGGT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"VGGT-1B not available: {e}")
+
+# Feature extractor & vector DB depend on FAISS (DLL may fail on Windows).
 try:
     from app.feature_extractor import get_extractor, get_vit_extractor
     from app.vector_db import get_vector_db, get_vit_vector_db
-    from app.vggt_processor import VGGTProcessor
     logger.info("ML dependencies loaded successfully")
 except ImportError as e:
-    logger.warning(f"ML dependencies not available: {e}. Using mock implementations.")
+    logger.warning(f"FAISS/ML dependencies not available: {e}. Using mock implementations.")
     USE_MOCK = True
-    VGGTProcessor = None  # type: ignore
 
 # ---------------------------------------------------------------------------
 # Mock classes (used ONLY when torch / transformers / faiss are not installed)
@@ -89,6 +99,33 @@ if USE_MOCK:
 
     def get_vit_vector_db():
         return _mock_vector_db
+
+# ── Mock VGGT processor (used when VGGT-1B itself fails to load) ─────────
+if not _VGGT_AVAILABLE:
+
+    class MockVGGTProcessor:
+        """Fallback mock that returns sane odometry values when VGGT-1B is unavailable."""
+
+        @torch.no_grad()
+        def get_relative_position(self, images_tensor: torch.Tensor) -> list[float]:
+            n = images_tensor.shape[1]  # number of frames
+            # Return a plausible zero-ish offset
+            return [0.0, 0.0, float(n) * 0.1]
+
+        @torch.no_grad()
+        def get_full_odometry(self, images_tensor: torch.Tensor) -> dict:
+            n = images_tensor.shape[1]
+            trajectory = []
+            for i in range(n):
+                trajectory.append({"dx": 0.0, "dy": 0.0, "dz": float(i) * 0.1})
+            return {
+                "trajectory": trajectory,
+                "heading_vector": {"x": 1.0, "y": 0.0},
+            }
+
+    class VGGTProcessor(MockVGGTProcessor):  # type: ignore
+        """Fallback alias so get_vggt_processor() always returns a valid type."""
+        pass
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -241,6 +278,209 @@ async def visual_locate(
         f"confidence={confidence_score}, top_match={landmark_ids[0]}"
     )
     return JSONResponse(content=response)
+
+
+# ── Fusion endpoint: ViT + VGGT in parallel ─────────────────────────
+
+@app.post("/api/v1/navigate-fusion")
+async def navigate_fusion(files: List[FixedUploadFile] = File(...)):
+    """
+    **Fused visual navigation** — runs ViT absolute positioning and VGGT-1B
+    visual odometry **sequentially** on a single set of 4 images.
+
+    The endpoint accepts **exactly 4 images** as ``multipart/form-data``
+    under the field name ``files``.
+
+    **Why 4 images?**
+    VGGT-1B benefits from multi-frame context for stable pose estimation;
+    ViT only needs the first frame for visual place recognition.  Both models
+    are executed **sequentially** (ViT first, then VGGT) with
+    ``torch.cuda.empty_cache()`` in between to prevent CUDA Out-Of-Memory
+    errors on consumer GPUs.
+
+    Returns:
+        ``{
+          "current_location": {"lat": float, "lng": float},
+          "trajectory": [{"dx": float, "dy": float, "dz": float}, ...],
+          "heading_vector": {"x": float, "y": float}
+        }``
+
+        - ``current_location`` — WGS‑84 coordinates from ViT + FAISS.
+        - ``trajectory`` — per-frame camera-centre displacement relative to
+          the first frame (length = number of input images).
+        - ``heading_vector`` — normalised 2D forward direction on the ground
+          plane (``x`` = lateral, ``y`` = forward/depth).
+    """
+    # ── 1. Validation ──────────────────────────────────────────────────
+    if not files or len(files) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="At least 2 images are required (4 recommended for best accuracy).",
+        )
+
+    logger.info(f"Navigate-fusion request: {len(files)} files received")
+
+    # ── 2. Read all images into memory ONCE ────────────────────────────
+    try:
+        images_bytes: list[bytes] = []
+        for f in files:
+            contents = await f.read()
+            if len(contents) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Empty file: {f.filename or 'unknown'}",
+                )
+            images_bytes.append(contents)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to read uploaded files: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"File read error: {str(e)}")
+
+    # ── 3. Run ViT and VGGT pipelines SEQUENTIALLY ────────────────────
+    #     ViT first → empty_cache → VGGT → empty_cache to prevent OOM
+    try:
+        # Step 3a: ViT (absolute positioning)
+        vit_result = await _run_vit_pipeline(images_bytes[0])
+
+        # Step 3b: Release VRAM used by ViT
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.debug("CUDA cache cleared after ViT inference")
+
+        # Step 3c: VGGT (visual odometry)
+        vggt_result = await _run_vggt_pipeline(images_bytes)
+
+        # Step 3d: Release VRAM used by VGGT
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.debug("CUDA cache cleared after VGGT inference")
+
+        # ── 4. Combine results ─────────────────────────────────────────
+        response = {
+            "current_location": {
+                "lat": vit_result["latitude"],
+                "lng": vit_result["longitude"],
+            },
+            "trajectory": vggt_result["trajectory"],
+            "heading_vector": vggt_result["heading_vector"],
+        }
+
+        logger.info(
+            f"Navigate-fusion complete: "
+            f"lat={vit_result['latitude']:.4f}, "
+            f"lon={vit_result['longitude']:.4f}, "
+            f"trajectory_len={len(vggt_result['trajectory'])}, "
+            f"heading=({vggt_result['heading_vector']['x']:.3f}, "
+            f"{vggt_result['heading_vector']['y']:.3f})"
+        )
+
+        return JSONResponse(content=response)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Navigate-fusion failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Navigation fusion failed: {str(e)}",
+        )
+
+
+async def _run_vit_pipeline(first_image_bytes: bytes) -> dict:
+    """
+    Run the ViT visual place recognition pipeline on a single image.
+
+    This is a **blocking** (CPU/GPU-bound) call wrapped in
+    ``asyncio.to_thread`` so it does not block the FastAPI event loop.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, _vit_pipeline_sync, first_image_bytes
+    )
+
+
+def _vit_pipeline_sync(image_bytes: bytes) -> dict:
+    """Synchronous ViT + FAISS pipeline (runs in a thread executor)."""
+    extractor, vector_db = get_vit_components()
+
+    # 1. Extract feature vector
+    feature_vector = extractor.extract_features_from_bytes(image_bytes)
+
+    # 2. Search FAISS
+    distances, indices, landmark_ids = vector_db.search(
+        feature_vector, k=5, scope_filter=None
+    )
+
+    if len(landmark_ids) == 0:
+        raise HTTPException(status_code=404, detail="No matching landmarks found")
+
+    # 3. Weighted average across top-k matches
+    positions = []
+    confidences = []
+    for lid, dist in zip(landmark_ids, distances):
+        pos = vector_db.get_landmark_position(lid)
+        if pos:
+            lat, lon, floor = pos
+            confidence = 1.0 / (1.0 + float(dist))
+            positions.append((lat, lon, floor))
+            confidences.append(confidence)
+
+    if not positions:
+        raise HTTPException(status_code=500, detail="Landmark metadata missing")
+
+    total_confidence = sum(confidences)
+    weighted_lat = sum(p[0] * c for p, c in zip(positions, confidences)) / total_confidence
+    weighted_lon = sum(p[1] * c for p, c in zip(positions, confidences)) / total_confidence
+
+    return {
+        "latitude": float(weighted_lat),
+        "longitude": float(weighted_lon),
+        "confidence": round(max(confidences), 4),
+    }
+
+
+async def _run_vggt_pipeline(images_bytes: list[bytes]) -> dict:
+    """
+    Run the VGGT-1B visual odometry pipeline on a list of image byte blobs.
+
+    Called **sequentially** after the ViT pipeline has finished and
+    ``torch.cuda.empty_cache()`` has been called.  Wrapped in
+    ``asyncio.to_thread`` (via ``run_in_executor``) so the blocking GPU
+    inference does not stall the event loop.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, _vggt_pipeline_sync, images_bytes
+    )
+
+
+def _vggt_pipeline_sync(images_bytes: list[bytes]) -> dict:
+    """Synchronous VGGT pipeline (runs in a thread executor)."""
+    from PIL import Image
+    import torchvision.transforms as T
+
+    # 1. Load & preprocess images
+    images_pil: list[Image.Image] = []
+    for img_bytes in images_bytes:
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        img = img.resize((518, 518), Image.BILINEAR)
+        images_pil.append(img)
+
+    to_tensor = T.ToTensor()
+    tensors = [to_tensor(img) for img in images_pil]
+    batch = torch.stack(tensors, dim=0).unsqueeze(0)  # (1, N, 3, 518, 518)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    batch = batch.to(device)
+    if device.type == "cuda":
+        batch = batch.half()
+
+    # 2. Run full odometry
+    processor = get_vggt_processor()
+    result = processor.get_full_odometry(batch)  # returns {"trajectory": [...], "heading_vector": {...}}
+
+    return result
 
 
 # ── Calibration placeholder (existing) ───────────────────────────────

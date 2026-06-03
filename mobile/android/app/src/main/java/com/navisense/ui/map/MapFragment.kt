@@ -60,6 +60,13 @@ class MapFragment : Fragment() {
     /** Reference to the currently displayed "Visual Pin" marker (ViT result). */
     private var visualPinMarker: Marker? = null
 
+    // ── SLAM Fusion rendering states ─────────────────────────────
+    /** Polyline showing the trajectory path from the fusion test. */
+    private var fusionPolyline: Polyline? = null
+
+    /** Marker at the current_location with heading rotation from the fusion test. */
+    private var fusionMarker: Marker? = null
+
     // Track filter button states
     private var visitedFilterActive = false
     private var favoritesFilterActive = false
@@ -444,6 +451,16 @@ class MapFragment : Fragment() {
                         updateVisualPinAppearance(state)
                     }
                 }
+
+                // Observe SLAM fusion result → render green trajectory + arrow marker
+                launch {
+                    viewModel.fusionResult.collectLatest { result ->
+                        if (result != null && isMapReady) {
+                            renderFusionResult(result)
+                            viewModel.clearFusionResult()
+                        }
+                    }
+                }
             }
         }
     }
@@ -633,6 +650,84 @@ class MapFragment : Fragment() {
      */
     private fun getVisualPinIcon(): BitmapDescriptor {
         return getLocationStateIcon(viewModel.locationState.value)
+    }
+
+    // ── SLAM Fusion Result Rendering ────────────────────────────────
+
+    /**
+     * Renders the SLAM fusion result on the map:
+     * - Draws the [trajectory] as a GREEN polyline.
+     * - Drops a marker at [current_location] with rotation matching [heading_vector].
+     * - Animates camera to show the full path.
+     *
+     * @param result The [MainViewModel.FusionResult] from the fused navigation endpoint.
+     */
+    private fun renderFusionResult(result: MainViewModel.FusionResult) {
+        // Remove previous fusion polyline and marker
+        fusionPolyline?.remove()
+        fusionMarker?.remove()
+
+        val latLng = LatLng(result.latitude, result.longitude)
+
+        // 1. Build trajectory polyline from relative displacements
+        val trajectoryPoints = result.trajectory.map { pt ->
+            // Each TrajectoryPoint (dx, dy, dz) is a relative 3D offset.
+            // We accumulate them onto the absolute position to get per-frame
+            // map coordinates. The scale factor converts VGGT metric units
+            // to approximate arc-seconds on the map. (1 meter ≈ 0.000009° lat)
+            LatLng(
+                result.latitude + pt.dz * 0.000009,
+                result.longitude + pt.dx * 0.000009
+            )
+        }
+
+        if (trajectoryPoints.isNotEmpty()) {
+            fusionPolyline = map.addPolyline(
+                PolylineOptions()
+                    .addAll(trajectoryPoints)
+                    .color(ContextCompat.getColor(requireContext(), R.color.fusion_polyline))
+                    .width(6f)
+                    .geodesic(false)
+            )
+        }
+
+        // 2. Compute heading bearing from the 2D heading vector
+        val bearingDegrees = result.headingVector.toBearingDegrees()
+
+        // 3. Drop a flat (map-aligned) arrow marker at the current location,
+        //    rotated to match the heading vector.
+        //    flat(true) ensures the marker rotates with the map, so the
+        //    heading arrow always points in the correct geographic direction.
+        fusionMarker = map.addMarker(
+            MarkerOptions()
+                .position(latLng)
+                .title("SLAM Fusion")
+                .snippet("heading %.1f°".format(bearingDegrees))
+                .rotation(bearingDegrees.toFloat())
+                .anchor(0.5f, 0.5f)
+                .flat(true)
+                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN))
+        )
+
+        // 4. Animate camera to show the full trajectory (or just the marker)
+        if (trajectoryPoints.size >= 2) {
+            val bounds = com.google.android.gms.maps.model.LatLngBounds.builder()
+                .include(trajectoryPoints.first())
+                .include(trajectoryPoints.last())
+                .include(latLng)
+                .build()
+            map.animateCamera(
+                CameraUpdateFactory.newLatLngBounds(bounds, 120)
+            )
+        } else {
+            map.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 17f))
+        }
+
+        Toast.makeText(
+            requireContext(),
+            "SLAM Fusion: ${trajectoryPoints.size} pts, heading ${"%.1f".format(bearingDegrees)}°",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     override fun onDestroyView() {
