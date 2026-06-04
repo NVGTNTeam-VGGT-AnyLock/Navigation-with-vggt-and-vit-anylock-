@@ -104,7 +104,10 @@ class FeatureExtractor:
             input_tensor = input_tensor.half()
         input_tensor = input_tensor.to(self.device)
 
-        outputs = self.model(input_tensor)
+        # Run forward pass with mixed precision for Tensor Core acceleration
+        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=(self.device.type == "cuda")):
+            outputs = self.model(input_tensor)
+
         # Use the [CLS] token representation (first token)
         features = outputs.last_hidden_state[:, 0, :].cpu().numpy().squeeze()
 

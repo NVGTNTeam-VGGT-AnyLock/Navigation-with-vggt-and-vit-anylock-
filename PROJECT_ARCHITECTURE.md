@@ -35,8 +35,10 @@ All ML models leverage **NVIDIA CUDA** when available:
 |---|---|---|
 | **CUDA auto-detection** | `VGGTProcessor`, ViT | Model device auto-selected (`cuda` if available, else `cpu`) |
 | **FP16 (Half Precision)** | ViT, VGGT | Models cast to `.half()` on GPU for 2× faster inference on Tensor Cores; input tensors also cast to FP16 before forward pass |
-| **`@torch.inference_mode()`** | ViT forward pass | Faster than `torch.no_grad()` — disables gradient tracking AND ops-specific inference hooks |
-| **`torch.cuda.amp.autocast()`** | `VGGTProcessor.get_full_odometry()` | Automatic Mixed Precision for the VGGT-1B forward pass; enables FP16 matrix multiplications while keeping critical ops in FP32 |
+| **`@torch.inference_mode()`** | ViT forward pass, VGGT both methods, `_run_vit_sync()`, `_run_vggt_sync()` | Faster than `torch.no_grad()` — disables gradient tracking AND ops-specific inference hooks. Applied at every inference entry point. |
+| **`torch.autocast(device_type='cuda', dtype=torch.float16)`** | `FeatureExtractor.extract_features()`, `VGGTProcessor.get_relative_position()`, `VGGTProcessor.get_full_odometry()`, `_run_vggt_sync()` | Automatic Mixed Precision for ALL forward passes; enables FP16 matrix multiplications while keeping critical ops in FP32. Replaced legacy `torch.cuda.amp.autocast`. |
+| **Model Persistence** | `main.py` singletons | Models loaded ONCE globally at startup via lazy singletons (`_get_vit_extractor()`, `_get_vggt()`). Never `del`'d inside the endpoint — only request-scoped tensors are deleted. |
+| **Image Downsampling** | VGGT pipeline | Input images resized to **224×224** (down from 518×518) before feeding into VGGT-1B, reducing compute by ~5.3×. |
 
 ### ML Models
 
@@ -123,8 +125,8 @@ sequenceDiagram
     Note over Backend: torch.cuda.empty_cache()
 
     Note over Backend: 2. VGGT (local odometry) — all 4 frames
-    Backend->>Backend: Resize to 518×518, stack tensor
-    Backend->>VGGT: Forward pass (CUDA + AMP)
+    Backend->>Backend: Resize to 224×224, stack tensor
+    Backend->>VGGT: Forward pass (CUDA + AMP + inference_mode)
     VGGT-->>Backend: Raw pose_encoding
     Backend->>Backend: Decode → extract R, t → heading angle
     Note over Backend: torch.cuda.empty_cache()
@@ -171,7 +173,7 @@ The **only** ML endpoint. Accepts exactly 4 images under the `files` multipart f
 1. **Validation** — exactly 4 non-empty images required.
 2. **Sequential Execution** — ViT runs first (absolute positioning on frame 4), then `torch.cuda.empty_cache()`, then VGGT (odometry on all 4 frames), then `torch.cuda.empty_cache()` again. Never parallel.
 3. **ViT Pipeline** — `google/vit-base-patch16-224`, extracts [CLS] token, L2-normalises, searches FAISS index (placeholder until real index is built).
-4. **VGGT Pipeline** — each image resized to 518×518, converted to `(1, 4, 3, 518, 518)` tensor, moved to CUDA + FP16, `get_full_odometry()` with AMP autocast.
+4. **VGGT Pipeline** — each image resized to **224×224** (down from 518×518), converted to `(1, 4, 3, 224, 224)` tensor, moved to CUDA, `get_full_odometry()` with `@torch.inference_mode()` + `torch.autocast(fp16)`.
 5. **Heading Calculation** — `atan2(heading_x, heading_y)` → degrees, normalised to `[0, 360)`.
 6. **Response** — simplified `{"lat": float, "lon": float, "heading": float}`.
 

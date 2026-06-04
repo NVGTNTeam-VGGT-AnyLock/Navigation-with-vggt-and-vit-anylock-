@@ -144,7 +144,8 @@ async def navigate_fusion(files: List[FixedUploadFile] = File(...)):
         # Step 3a: ViT (absolute positioning) — use LAST frame (frame_4)
         lat, lon = _run_vit_sync(images_bytes[3])
 
-        # Step 3b: Release VRAM used by ViT
+        # Step 3b: Release VRAM used by ViT — delete tensors, then empty cache
+        del images_bytes[3]
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             logger.debug("CUDA cache cleared after ViT inference")
@@ -152,7 +153,8 @@ async def navigate_fusion(files: List[FixedUploadFile] = File(...)):
         # Step 3c: VGGT (visual odometry) — use ALL 4 frames
         heading = _run_vggt_sync(images_bytes)
 
-        # Step 3d: Release VRAM used by VGGT
+        # Step 3d: Release VRAM used by VGGT — delete tensors, then empty cache
+        del images_bytes
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             logger.debug("CUDA cache cleared after VGGT inference")
@@ -185,6 +187,7 @@ async def navigate_fusion(files: List[FixedUploadFile] = File(...)):
 #  Synchronous ML pipelines (run in thread executor)
 # =====================================================================
 
+@torch.inference_mode()
 def _run_vit_sync(image_bytes: bytes) -> tuple[float, float]:
     """
     Run ViT feature extraction + FAISS search on a single image.
@@ -233,6 +236,7 @@ def _run_vit_sync(image_bytes: bytes) -> tuple[float, float]:
     return (50.4501, 30.5234)
 
 
+@torch.inference_mode()
 def _run_vggt_sync(images_bytes: list[bytes]) -> float:
     """
     Run VGGT-1B visual odometry on a list of image byte blobs.
@@ -242,24 +246,23 @@ def _run_vggt_sync(images_bytes: list[bytes]) -> float:
     """
     processor = _get_vggt()
 
-    # Load & preprocess images
+    # Load & preprocess images — downsample to 224x224 for fast inference
     images_pil: list[Image.Image] = []
     for img_bytes in images_bytes:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        img = img.resize((518, 518), Image.BILINEAR)
+        img = img.resize((224, 224), Image.BILINEAR)
         images_pil.append(img)
 
     to_tensor = T.ToTensor()
     tensors = [to_tensor(img) for img in images_pil]
-    batch = torch.stack(tensors, dim=0).unsqueeze(0)  # (1, N, 3, 518, 518)
+    batch = torch.stack(tensors, dim=0).unsqueeze(0)  # (1, N, 3, 224, 224)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch = batch.to(device)
-    if device.type == "cuda":
-        batch = batch.half()
 
-    # Run full odometry
-    result = processor.get_full_odometry(batch)
+    # Run full odometry with mixed precision
+    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == "cuda")):
+        result = processor.get_full_odometry(batch)
 
     # Extract heading vector → convert to degrees
     hx = result["heading_vector"]["x"]

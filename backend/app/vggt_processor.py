@@ -38,13 +38,13 @@ class VGGTProcessor:
         self.model = self.model.to(self.device)
         print("[VGGTProcessor] Model loaded successfully.")
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def get_relative_position(self, images_tensor: torch.Tensor) -> list[float]:
         """
         Estimate the relative camera position from a sequence of images.
 
         Args:
-            images_tensor: Preprocessed image tensor of shape ``(1, N, 3, 518, 518)``
+            images_tensor: Preprocessed image tensor of shape ``(1, N, 3, H, W)``
                            where ``N`` is the number of frames, values in ``[0, 1]``.
 
         Returns:
@@ -66,14 +66,14 @@ class VGGTProcessor:
         # Move to the correct device
         images_tensor = images_tensor.to(self.device)
 
-        # ---- 1. Run the model ------------------------------------------------
-        with torch.cuda.amp.autocast(enabled=self.device.type == "cuda"):
+        # ---- 1. Run the model with mixed precision ---------------------------
+        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=(self.device.type == "cuda")):
             predictions = self.model(images_tensor)
 
         pose_enc = predictions["pose_enc"]  # shape (1, N, 9)
 
         # ---- 2. Decode pose encoding → extrinsic / intrinsic matrices --------
-        image_size_hw = (images_tensor.shape[-2], images_tensor.shape[-1])  # (518, 518)
+        image_size_hw = (images_tensor.shape[-2], images_tensor.shape[-1])
         extrinsics, _ = pose_encoding_to_extri_intri(
             pose_enc, image_size_hw=image_size_hw
         )  # extrinsics shape: (1, N, 3, 4)
@@ -87,14 +87,14 @@ class VGGTProcessor:
 
         return camera_centre.cpu().tolist()
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def get_full_odometry(self, images_tensor: torch.Tensor) -> dict:
         """
         Run VGGT-1B inference and return the **full** per-frame camera centres
         (trajectory) plus the heading vector of the last frame.
 
         Args:
-            images_tensor: Preprocessed image tensor of shape ``(1, N, 3, 518, 518)``
+            images_tensor: Preprocessed image tensor of shape ``(1, N, 3, H, W)``
                            with values in ``[0, 1]``.
 
         Returns:
@@ -120,8 +120,8 @@ class VGGTProcessor:
 
         images_tensor = images_tensor.to(self.device)
 
-        # ---- 1. Run the model ------------------------------------------------
-        with torch.cuda.amp.autocast(enabled=self.device.type == "cuda"):
+        # ---- 1. Run the model with mixed precision ---------------------------
+        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=(self.device.type == "cuda")):
             predictions = self.model(images_tensor)
 
         pose_enc = predictions["pose_enc"]  # (1, N, 9)
