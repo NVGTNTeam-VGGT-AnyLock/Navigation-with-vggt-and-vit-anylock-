@@ -50,4 +50,9 @@
 
     <!-- SLAM Fusion colours -->
     <color name="fusion_polyline">#FF4CAF50</color>
+
+    <!-- Path History (green polyline on map) -->
+    <color name="path_history_green">#FF4CAF50</color>
 </resources>
+
+

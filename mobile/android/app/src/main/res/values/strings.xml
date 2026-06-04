@@ -207,8 +207,37 @@
     <string name="mock_loc_10_desc">Modern supermarket with organic section and bakery.</string>
 
     <!-- ═══════════════════════════════════════════════════════════════
+         NAVISENSE 2.0 — SINGLE-SCREEN UI STRINGS
+         ═══════════════════════════════════════════════════════════════ -->
+
+    <!-- Destination Search -->
+    <string name="destination_hint">Куди прямуємо?</string>
+    <string name="searching_for">Searching for %s…</string>
+
+    <!-- Mode Toggle -->
+    <string name="mode_pedestrian">🚶 Pedestrian</string>
+    <string name="mode_transport">🚗 Transport</string>
+
+    <!-- Action Buttons -->
+    <string name="update_location">Оновити локацію</string>
+    <string name="test">Test</string>
+    <string name="start_trip">Почати поїздку</string>
+    <string name="end_trip">Завершити поїздку</string>
+
+    <!-- Fusion Test -->
+    <string name="testing_fusion">🧪 Testing SLAM Fusion…</string>
+    <!-- Map Marker -->
+    <string name="current_location_title">Current Location</string>
+    <string name="heading_format">Heading: %d°</string>
+
+    <!-- Placeholder toasts (wired in next phase) -->
+    <string name="update_location_placeholder">📍 Update Location — will be wired in next phase</string>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
          PHASE 5/6: TRANSPORT & PEDESTRIAN MODE STRINGS
          ═══════════════════════════════════════════════════════════════ -->
+
 
     <!-- Transport (Vehicle) Mode -->
     <string name="tab_transport">Transport</string>

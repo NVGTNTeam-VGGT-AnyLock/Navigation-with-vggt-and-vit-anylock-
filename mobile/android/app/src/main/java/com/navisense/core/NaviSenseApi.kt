@@ -64,6 +64,24 @@ data class VggtOdometryResponse(
 // ── Fusion endpoint DTOs ─────────────────────────────────────────────
 
 /**
+ * Simplified response from the NaviSense 2.0 fusion endpoint
+ * (`POST /api/v1/navigate-fusion`).
+ *
+ * The backend runs ViT (absolute positioning) and VGGT-1B (visual odometry)
+ * **sequentially** and returns a single combined result.
+ *
+ * @property lat     WGS‑84 latitude estimated by ViT + FAISS.
+ * @property lon     WGS‑84 longitude estimated by ViT + FAISS.
+ * @property heading Forward direction angle in degrees
+ *                   (0° = North, 90° = East, 180° = South, 270° = West).
+ */
+data class FusionResponse(
+    val lat: Double,
+    val lon: Double,
+    val heading: Double
+)
+
+/**
  * WGS‑84 location estimated by the ViT model via FAISS search.
  *
  * @property lat WGS‑84 latitude.
@@ -92,6 +110,7 @@ data class NavigateFusionResponse(
     val trajectory: List<TrajectoryPoint>,
     val heading_vector: HeadingVector
 )
+
 
 /**
  * Retrofit interface for communicating with the NaviSense backend API.
@@ -152,21 +171,22 @@ interface NaviSenseApi {
      * (VGGT-1B) in a single request.
      *
      * Sends **4 images** as a single multipart request. The backend runs
-     * both models in parallel and returns a combined result.
+     * both models **sequentially** (ViT → empty_cache → VGGT → empty_cache)
+     * to prevent CUDA OOM errors.
      *
      * **Critical:** Each part must be created with form field name `"files"`
      * to match the backend signature:
      * `files: List[FixedUploadFile] = File(...)`.
      *
-     * @param files List of MultipartBody.Part (at least 2, 4 recommended),
+     * @param files List of MultipartBody.Part (exactly 4),
      *              each created via
      *              `FileManagerService.prepareImagePart(file, fieldName = "files")`.
-     * @return NavigateFusionResponse with current_location, trajectory,
-     *         and heading_vector.
+     * @return [FusionResponse] with lat, lon, and heading.
      */
     @Multipart
     @POST("api/v1/navigate-fusion")
     suspend fun navigateFusion(
         @Part files: List<MultipartBody.Part>
-    ): Response<NavigateFusionResponse>
+    ): Response<FusionResponse>
+
 }

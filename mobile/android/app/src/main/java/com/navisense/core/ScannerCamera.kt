@@ -18,6 +18,9 @@ import java.util.concurrent.Executors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -64,6 +67,17 @@ class ScannerCamera(
      * to a stale (destroyed) lifecycle owner.
      */
     private var isShutdown = false
+
+    /**
+     * Public [StateFlow] that emits `true` once CameraX has been fully initialised
+     * and [bindToLifecycle] has completed successfully. Consumers (e.g. [MapViewModel]
+     * or [MapFragment]) MUST observe this flow and never call [captureBurst] or
+     * [captureSharpImage] until the value is `true`.
+     *
+     * The flow emits `false` on initialisation and after [shutdown].
+     */
+    private val _isCameraReady = MutableStateFlow(false)
+    val isCameraReady: StateFlow<Boolean> = _isCameraReady.asStateFlow()
 
     /** Threshold for Laplacian variance below which an image is considered blurry. */
     private var blurThreshold: Double = DEFAULT_BLUR_THRESHOLD
@@ -155,9 +169,13 @@ class ScannerCamera(
                 preview,
                 imageCapture
             )
+            // Signal that the camera is fully initialised and ready for capture.
+            _isCameraReady.value = true
+            Log.d(tag, "Camera initialised and ready for capture")
         } catch (e: Exception) {
             Log.e(tag, "Failed to bind camera use cases", e)
             fileManagerService.logError("Failed to bind camera use cases: ${e.message}")
+            _isCameraReady.value = false
         }
     }
 
@@ -521,6 +539,7 @@ class ScannerCamera(
     fun shutdown() {
         Log.w(tag, "shutdown — unbinding all use cases")
         isShutdown = true
+        _isCameraReady.value = false
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageCapture = null

@@ -1,19 +1,23 @@
-# Project Context: NaviSense
-Visual SLAM mobile navigation system.
+# Project Context: NaviSense 2.0
+Visual SLAM mobile navigation system — single-screen, GPS-denied navigation.
 
 ## Tech Stack
 * Backend: Python 3.12 (isolated venv), FastAPI, asyncio.
-* ML Models: PyTorch (CUDA 12.1), ViT + FAISS (absolute positioning), VGGT (visual odometry).
-* Client: Native Android (Kotlin, MVVM, Retrofit).
+* ML Models: PyTorch (CUDA 12.1), ViT (absolute positioning), VGGT-1B (visual odometry).
+* Client: Native Android (Kotlin, MVVM, Retrofit, single MapFragment).
 
 ## Architecture & Code Guidelines
-* Storage: Never store images as BLOBs in the database. Save images to local disk folders and store only relative paths in the DB/JSON.
-* ML Pipeline Execution: ViT and VGGT MUST be executed sequentially (ViT first, then VGGT) with `torch.cuda.empty_cache()` called in between. Never run heavy ML models concurrently to prevent CUDA Out-Of-Memory errors.
-* Error Handling: Always provide robust fallback logic (Mock implementations) if C++ or ML dependencies fail to load.
-* Android: Ensure strict typing in ViewModels.
-
+* **Storage:** Never store images as BLOBs in the database. Save images to local disk folders and store only relative paths in the DB/JSON.
+* **ML Pipeline Execution:** ViT and VGGT MUST be executed sequentially (ViT first, then VGGT) with `torch.cuda.empty_cache()` called in between. Never run heavy ML models concurrently to prevent CUDA Out-Of-Memory errors.
+* **No Mock Classes:** If PyTorch, ViT, or VGGT fails to load, return HTTP 500. No fallback mock implementations.
+* **Android:** Single-screen architecture (MapFragment + MapViewModel). All other screens removed.
+* **Database (Room):** Single `PathHistory` table (id, lat, lon, heading, timestamp, transportMode). History is NEVER deleted when switching modes, only appended.
+* **Map Rendering:**
+  1. Blue Line = Planned Route (Google Directions API)
+  2. Green Line = History (from Room DB)
+  3. User Marker = `current_location` with `rotation` = `heading` (from VGGT)
 
 ## Documentation Maintenance (Single Source of Truth)
 * Synchronous Updates: After successfully fixing a bug, resolving a blocker, or writing new code, you MUST automatically analyze how this changes the system.
-* Update Architecture: Promptly update the `Project_Context.md` (or the relevant architecture markdown file) to reflect the newly resolved issues, current architecture, and updated status (e.g., moving an item from "Blocker" to "Done"). 
+* Update Architecture: Promptly update the `PROJECT_ARCHITECTURE.md` to reflect the newly resolved issues, current architecture, and updated status.
 * Rule of thumb: Never leave the documentation in a stale state after modifying the codebase.

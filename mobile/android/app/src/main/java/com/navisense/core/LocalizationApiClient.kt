@@ -363,14 +363,8 @@ class LocalizationApiClient private constructor(
      * ``POST /api/v1/navigate-fusion``.
      *
      * The backend runs ViT (absolute position) and VGGT-1B (visual odometry)
-     * **in parallel** and returns a single combined response.
-     *
-     * ## Why this is faster
-     * Previously the app made two sequential round-trips: one for ViT position
-     * and one for VGGT odometry. This single-call approach:
-     * - Saves one network round-trip (latency).
-     * - Lets the server run both models concurrently (server-side parallelism).
-     * - Eliminates the need to duplicate the first frame on the client.
+     * **sequentially** (ViT → empty_cache → VGGT → empty_cache) to prevent
+     * CUDA Out-Of-Memory errors on the server.
      *
      * ## Retry Policy
      * Same as [vggtOdometry]: up to [MAX_RETRIES] attempts with exponential
@@ -380,16 +374,15 @@ class LocalizationApiClient private constructor(
      * ## Cleanup
      * All temporary files are deleted regardless of success or failure.
      *
-     * @param files The list of JPEG files to upload (typically 4 burst captures).
+     * @param files The list of JPEG files to upload (exactly 4 burst captures).
      *              All files must exist in the TempScans directory.
-     * @return [NavigateFusionResponse] containing [NavigateFusionResponse.current_location],
-     *         [NavigateFusionResponse.trajectory], and [NavigateFusionResponse.heading_vector].
+     * @return [FusionResponse] with lat, lon, and heading.
      * @throws IOException if the network request fails after all retries.
      * @throws FileManagerService.FileManagerException if any file cannot be prepared.
      */
-    suspend fun navigateFusion(files: List<File>): NavigateFusionResponse = withContext(Dispatchers.IO) {
+    suspend fun navigateFusion(files: List<File>): FusionResponse = withContext(Dispatchers.IO) {
         var lastException: IOException? = null
-        var finalResponse: NavigateFusionResponse? = null
+        var finalResponse: FusionResponse? = null
 
         for (attempt in 0..MAX_RETRIES) {
             try {
@@ -399,7 +392,7 @@ class LocalizationApiClient private constructor(
                 }
 
                 // Perform the network request
-                val response: Response<NavigateFusionResponse> = api.navigateFusion(imageParts)
+                val response: Response<FusionResponse> = api.navigateFusion(imageParts)
 
                 if (!response.isSuccessful) {
                     val errorBody = response.errorBody()?.string() ?: "Unknown error"
@@ -417,7 +410,7 @@ class LocalizationApiClient private constructor(
                     } else {
                         when (response.code()) {
                             400 -> throw IOException(
-                                "Navigate-fusion requires at least 2 images (got ${files.size})"
+                                "Navigate-fusion requires exactly 4 images (got ${files.size})"
                             )
                             404 -> throw IOException("Location not recognized in database")
                             else -> throw IOException(
@@ -472,4 +465,5 @@ class LocalizationApiClient private constructor(
                 ?: IOException("Navigate-fusion failed after $MAX_RETRIES retries")
         }
     }
+
 }
